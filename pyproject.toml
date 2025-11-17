@@ -1,7 +1,7 @@
 [project]
 name = "async-task"
 version = "0.1.0"
-description = "Laravel-inspired task queue system for Python with async-first design and multi-backend support (Redis/AWS SQS)"
+description = "Laravel-inspired task queue system for Python with async-first design and multi-driver support (Redis/AWS SQS)"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -55,11 +55,6 @@ dev = [
     "pytest-cov>=4.0.0",
     "ruff>=0.14.4",
     "pre-commit>=3.0.0",
-]
-docs = [
-    "mkdocs>=1.5.0",
-    "mkdocs-material>=9.0.0",
-    "mkdocstrings[python]>=0.24.0",
 ]
 
 [tool.ruff]
