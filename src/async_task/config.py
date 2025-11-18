@@ -70,3 +70,20 @@ class Config:
         if config["default_retry_delay"] < 0:
             raise ValueError("default_retry_delay must be non-negative")
 
+
+_global_config: Config | None = None
+
+
+def set_global_config(**overrides) -> None:
+    """Set global configuration for the async_task library"""
+    global _global_config
+    _global_config = Config.from_env(**overrides)
+
+
+def get_global_config() -> Config:
+    """Get global configuration for the async_task library, initializing from environment if not set"""
+    global _global_config
+    if _global_config is None:
+        _global_config = Config.from_env()
+
+    return _global_config
