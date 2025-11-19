@@ -109,11 +109,11 @@ class RedisDriver(BaseDriver):
         else:
             return await self.client.rpop(f"queue:{queue_name}")  # type: ignore[return-value]
 
-    async def ack(self, queue_name: str, receipt_handle: str) -> None:
+    async def ack(self, queue_name: str, receipt_handle: bytes) -> None:
         """No-op for Redis (task removed on dequeue). Satisfies BaseDriver interface."""
         pass
 
-    async def nack(self, queue_name: str, receipt_handle: str) -> None:
+    async def nack(self, queue_name: str, receipt_handle: bytes) -> None:
         """Re-queue task for immediate retry (adds to front of queue).
 
         Args:
@@ -128,7 +128,7 @@ class RedisDriver(BaseDriver):
         # In Redis, receipt_handle is the task data itself
         await self.client.lpush(
             f"queue:{queue_name}",
-            receipt_handle.encode() if isinstance(receipt_handle, str) else receipt_handle,
+            receipt_handle,
         )  # type: ignore[misc]
 
     async def get_queue_size(self, queue_name: str) -> int:

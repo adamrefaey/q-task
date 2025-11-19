@@ -107,7 +107,7 @@ class BaseDriver(Protocol):
         ...
 
     @abstractmethod
-    async def ack(self, queue_name: str, receipt_handle: str) -> None:
+    async def ack(self, queue_name: str, receipt_handle: bytes) -> None:
         """Acknowledge successful processing of a task.
 
         Args:
@@ -124,7 +124,7 @@ class BaseDriver(Protocol):
         ...
 
     @abstractmethod
-    async def nack(self, queue_name: str, receipt_handle: str) -> None:
+    async def nack(self, queue_name: str, receipt_handle: bytes) -> None:
         """Reject a task, making it available for reprocessing.
 
         Args:

@@ -178,7 +178,7 @@ class SQSDriver(BaseDriver):
 
         return task_data
 
-    async def ack(self, queue_name: str, receipt_handle: str) -> None:
+    async def ack(self, queue_name: str, receipt_handle: bytes) -> None:
         """Acknowledge successful task processing.
 
         Deletes message from queue. Receipt handle is task_data from dequeue(),
@@ -186,7 +186,7 @@ class SQSDriver(BaseDriver):
 
         Args:
             queue_name: Queue name
-            receipt_handle: Task data (as str) from dequeue()
+            receipt_handle: Task data (as bytes) from dequeue()
 
         Note:
             Idempotent - safe to call multiple times.
@@ -197,9 +197,7 @@ class SQSDriver(BaseDriver):
             assert self.client is not None
 
         # Retrieve actual SQS receipt handle from cache
-        # receipt_handle parameter is already a str, convert to bytes to match dict key type
-        task_data_key = receipt_handle.encode()
-        sqs_receipt_handle = self._receipt_handles.get(task_data_key)
+        sqs_receipt_handle = self._receipt_handles.get(receipt_handle)
 
         if sqs_receipt_handle is None:
             # Receipt handle not found - message may have been already ack'd or timed out
@@ -210,9 +208,9 @@ class SQSDriver(BaseDriver):
         await self.client.delete_message(QueueUrl=queue_url, ReceiptHandle=sqs_receipt_handle)
 
         # Clean up receipt handle from cache
-        self._receipt_handles.pop(task_data_key, None)
+        self._receipt_handles.pop(receipt_handle, None)
 
-    async def nack(self, queue_name: str, receipt_handle: str) -> None:
+    async def nack(self, queue_name: str, receipt_handle: bytes) -> None:
         """Reject task and make immediately available for reprocessing.
 
         Sets visibility timeout to 0. Receipt handle is task_data from dequeue(),
@@ -220,7 +218,7 @@ class SQSDriver(BaseDriver):
 
         Args:
             queue_name: Queue name
-            receipt_handle: Task data (as str) from dequeue()
+            receipt_handle: Task data (as bytes) from dequeue()
 
         Note:
             Idempotent - safe to call multiple times.
@@ -231,9 +229,7 @@ class SQSDriver(BaseDriver):
             assert self.client is not None
 
         # Retrieve actual SQS receipt handle from cache
-        # receipt_handle parameter is already a str, convert to bytes to match dict key type
-        task_data_key = receipt_handle.encode()
-        sqs_receipt_handle = self._receipt_handles.get(task_data_key)
+        sqs_receipt_handle = self._receipt_handles.get(receipt_handle)
 
         if sqs_receipt_handle is None:
             # Receipt handle not found - message may have been already processed or timed out
@@ -248,7 +244,7 @@ class SQSDriver(BaseDriver):
         )
 
         # Clean up receipt handle from cache (it will get new handle on next receive)
-        self._receipt_handles.pop(task_data_key, None)
+        self._receipt_handles.pop(receipt_handle, None)
 
     async def get_queue_size(self, queue_name: str) -> int:
         """Get approximate number of visible messages in queue.

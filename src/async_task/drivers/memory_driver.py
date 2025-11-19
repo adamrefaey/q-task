@@ -135,30 +135,26 @@ class MemoryDriver(BaseDriver):
 
         return None
 
-    async def ack(self, queue_name: str, receipt_handle: str) -> None:
+    async def ack(self, queue_name: str, receipt_handle: bytes) -> None:
         """Acknowledge successful completion (remove from in-flight tracking)."""
 
         if not self._connected:
             await self.connect()
 
-        task_data = receipt_handle.encode()
+        self._processing.pop(receipt_handle, None)
 
-        self._processing.pop(task_data, None)
-
-    async def nack(self, queue_name: str, receipt_handle: str) -> None:
+    async def nack(self, queue_name: str, receipt_handle: bytes) -> None:
         """Reject task and re-insert at front for immediate retry."""
 
         if not self._connected:
             await self.connect()
 
-        task_data = receipt_handle.encode()
-
-        self._processing.pop(task_data, None)
+        self._processing.pop(receipt_handle, None)
 
         if queue_name not in self._queues:
             self._queues[queue_name] = deque()
 
-        self._queues[queue_name].appendleft(task_data)
+        self._queues[queue_name].appendleft(receipt_handle)
 
     async def get_queue_size(self, queue_name: str) -> int:
         """Get exact count of tasks in queue (excludes in-flight and delayed)."""
