@@ -34,7 +34,10 @@ class MemoryDriver(BaseDriver):
     _connected: bool = field(default=False, init=False, repr=False)
 
     async def connect(self) -> None:
-        """Initialize queues and start background processor (100ms polling)."""
+        """Initialize queues and start background processor (100ms polling).
+
+        Idempotent - safe to call multiple times.
+        """
 
         if self._connected:
             return
@@ -42,18 +45,22 @@ class MemoryDriver(BaseDriver):
         self._queues = {}
         self._delayed_tasks = {}
         self._processing = {}
-        self._background_task = asyncio.create_task(self._process_delayed_tasks_loop())
+        self._background_task = asyncio.create_task(
+            self._process_delayed_tasks_loop(), name="memory_driver_delayed_processor"
+        )
         self._connected = True
 
     async def disconnect(self) -> None:
-        """Stop background processor and clear all data."""
+        """Stop background processor and clear all data.
+
+        Idempotent - safe to call multiple times.
+        """
 
         if not self._connected:
             return
 
         if self._background_task and not self._background_task.done():
             self._background_task.cancel()
-
             try:
                 await self._background_task
             except asyncio.CancelledError:
@@ -62,6 +69,7 @@ class MemoryDriver(BaseDriver):
         self._queues.clear()
         self._delayed_tasks.clear()
         self._processing.clear()
+        self._background_task = None
         self._connected = False
 
     async def enqueue(self, queue_name: str, task_data: bytes, delay_seconds: int = 0) -> None:
@@ -88,9 +96,11 @@ class MemoryDriver(BaseDriver):
             if queue_name not in self._delayed_tasks:
                 self._delayed_tasks[queue_name] = []
 
-            target_time = asyncio.get_event_loop().time() + delay_seconds
+            loop = asyncio.get_running_loop()
+            target_time = loop.time() + delay_seconds
+
             self._delayed_tasks[queue_name].append((target_time, task_data))
-            self._delayed_tasks[queue_name].sort(key=lambda x: x[0])
+            self._delayed_tasks[queue_name].sort(key=lambda item: item[0])
 
     async def dequeue(self, queue_name: str, timeout: int = 0) -> bytes | None:
         """Retrieve task from queue.
@@ -105,6 +115,7 @@ class MemoryDriver(BaseDriver):
         Note:
             Polls every 100ms if timeout > 0. Task tracked in _processing until ack/nack.
         """
+
         if not self._connected:
             await self.connect()
 
@@ -120,11 +131,13 @@ class MemoryDriver(BaseDriver):
 
             return task_data
 
-        # Poll if timeout specified
+        # Poll if timeout specified (100ms interval)
         if timeout > 0:
-            start_time = asyncio.get_event_loop().time()
+            loop = asyncio.get_running_loop()
+            start_time = loop.time()
+            deadline = start_time + timeout
 
-            while asyncio.get_event_loop().time() - start_time < timeout:
+            while loop.time() < deadline:
                 await asyncio.sleep(0.1)
 
                 if queue:
@@ -177,7 +190,8 @@ class MemoryDriver(BaseDriver):
     async def _process_delayed_tasks(self) -> None:
         """Move tasks with target_time <= now to main queues."""
 
-        current_time = asyncio.get_event_loop().time()
+        loop = asyncio.get_running_loop()
+        current_time = loop.time()
 
         for queue_name, delayed_tasks in list(self._delayed_tasks.items()):
             ready_tasks = []
