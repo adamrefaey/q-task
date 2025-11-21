@@ -26,6 +26,8 @@ class MemoryDriver(BaseDriver):
     """
 
     _queues: dict[str, deque[bytes]] = field(default_factory=dict, init=False, repr=False)
+    # Example: {"default": [(timestamp, task_data), (1234567895.2, b"task2")]}
+    # Access tuple: _delayed_tasks["queue_name"][0] -> (float, bytes)
     _delayed_tasks: dict[str, list[tuple[float, bytes]]] = field(
         default_factory=dict, init=False, repr=False
     )
