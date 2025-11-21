@@ -1,6 +1,5 @@
 from dataclasses import dataclass, field
 from time import time
-from typing import Any
 
 from redis.asyncio import Redis
 
