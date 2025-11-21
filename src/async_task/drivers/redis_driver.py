@@ -11,17 +11,20 @@ class RedisDriver(BaseDriver):
     """Redis-based queue driver using Lists for immediate tasks and Sorted Sets for delayed tasks.
 
     Architecture:
-        - Immediate tasks: Redis List at "queue:{name}" (LPUSH/RPOP for FIFO)
+        - Immediate tasks: Redis List at "queue:{name}" (LPUSH/LMOVE for FIFO)
+        - Processing tasks: Redis List at "queue:{name}:processing" (in-flight tracking)
         - Delayed tasks: Sorted Set at "queue:{name}:delayed" (score = Unix timestamp)
         - Ready delayed tasks are moved to main queue atomically via pipeline transaction
 
     Design Decisions:
+        - Reliable Queue Pattern: Uses LMOVE to atomically move tasks to processing list
+        - Processing list enables crash recovery and prevents nack-after-ack bugs
         - Sorted sets over TTL/Lua: Simpler, atomic, no external dependencies
         - Pipeline with MULTI/EXEC: Prevents duplicate processing during delayed→main transfer
         - RESP3 protocol: Better performance than RESP2 (requires Redis 6.0+)
 
     Requirements:
-        - Python 3.11+, redis-py 7.0+, Redis server 5.0+ (6.0+ for RESP3)
+        - Python 3.11+, redis-py 7.0+, Redis server 6.2.0+ (for LMOVE command)
     """
 
     url: str = "redis://localhost:6379"
@@ -79,7 +82,7 @@ class RedisDriver(BaseDriver):
             await self.client.lpush(f"queue:{queue_name}", task_data)  # type: ignore[misc]
 
     async def dequeue(self, queue_name: str, poll_seconds: int = 0) -> bytes | None:
-        """Retrieve next task from queue.
+        """Retrieve next task from queue using Reliable Queue pattern.
 
         Args:
             queue_name: Name of the queue
@@ -88,8 +91,9 @@ class RedisDriver(BaseDriver):
         Returns:
             Serialized task data or None if queue empty
 
-        Note:
-            Processes delayed tasks first, then dequeues from main queue.
+        Implementation:
+            Uses LMOVE to atomically move task from main queue to processing list.
+            This implements Redis's "Reliable Queue" pattern for crash recovery.
         """
 
         if self.client is None:
@@ -99,36 +103,69 @@ class RedisDriver(BaseDriver):
         # Move any ready delayed tasks to main queue
         await self._process_delayed_tasks(queue_name)
 
-        # Pop from main queue (RPOP for FIFO with LPUSH)
+        main_key = f"queue:{queue_name}"
+        processing_key = f"queue:{queue_name}:processing"
+
+        # Atomically move from main queue to processing list (Reliable Queue pattern)
         if poll_seconds > 0:
-            result: tuple[bytes, bytes] | None = await self.client.brpop(
-                [f"queue:{queue_name}"], timeout=poll_seconds
+            # BLMOVE: blocking version with timeout
+            result: bytes | None = await self.client.blmove(
+                main_key, processing_key, poll_seconds, "RIGHT", "LEFT"
             )  # type: ignore[assignment]
-            return result[1] if result else None
+            return result
         else:
-            return await self.client.rpop(f"queue:{queue_name}")  # type: ignore[return-value]
+            # LMOVE: non-blocking version
+            return await self.client.lmove(main_key, processing_key, "RIGHT", "LEFT")  # type: ignore[return-value]
 
     async def ack(self, queue_name: str, receipt_handle: bytes) -> None:
-        """No-op for Redis (task removed on dequeue). Satisfies BaseDriver interface."""
-        pass
-
-    async def nack(self, queue_name: str, receipt_handle: bytes) -> None:
-        """Re-queue task for immediate retry (adds to front of queue).
+        """Acknowledge successful task processing (remove from processing list).
 
         Args:
             queue_name: Name of the queue
             receipt_handle: Task data from dequeue
+
+        Implementation:
+            Uses LREM to remove task from processing list. Idempotent operation.
+        """
+        if self.client is None:
+            await self.connect()
+            assert self.client is not None
+
+        processing_key = f"queue:{queue_name}:processing"
+        # Remove task from processing list (LREM: count=1 removes first occurrence)
+        await self.client.lrem(processing_key, 1, receipt_handle)  # type: ignore[misc]
+
+    async def nack(self, queue_name: str, receipt_handle: bytes) -> None:
+        """Reject task and re-queue for immediate retry.
+
+        Args:
+            queue_name: Name of the queue
+            receipt_handle: Task data from dequeue
+
+        Implementation:
+            Only requeues if task exists in processing list (prevents nack-after-ack).
+            Uses LMOVE to atomically move from processing list back to main queue.
         """
 
         if self.client is None:
             await self.connect()
             assert self.client is not None
 
-        # In Redis, receipt_handle is the task data itself
-        await self.client.lpush(
-            f"queue:{queue_name}",
-            receipt_handle,
-        )  # type: ignore[misc]
+        processing_key = f"queue:{queue_name}:processing"
+        main_key = f"queue:{queue_name}"
+
+        # Check if task is in processing list, then atomically move it back
+        # Use pipeline to make it atomic: LREM (check+remove) then LPUSH (if found)
+        async with self.client.pipeline(transaction=True) as pipe:
+            # LREM returns count of removed items (0 if not found, 1 if found)
+            pipe.lrem(processing_key, 1, receipt_handle)  # type: ignore[arg-type]
+            pipe.lpush(main_key, receipt_handle)
+            results = await pipe.execute()
+            
+            # If LREM returned 0, the task wasn't in processing, so remove it from main queue
+            # This handles the nack-after-ack case
+            if results[0] == 0:
+                await self.client.lrem(main_key, 1, receipt_handle)  # type: ignore[misc]
 
     async def get_queue_size(
         self,
@@ -147,8 +184,7 @@ class RedisDriver(BaseDriver):
             Task count based on parameters
 
         Note:
-            Redis driver does not track in-flight tasks separately,
-            so include_in_flight parameter is ignored (always returns 0 for in-flight).
+            Now tracks in-flight tasks in processing list.
         """
 
         if self.client is None:
@@ -158,11 +194,12 @@ class RedisDriver(BaseDriver):
         size: int = await self.client.llen(f"queue:{queue_name}")  # type: ignore[assignment]
 
         if include_delayed:
-            delayed_size: int = await self.client.zcard(f"delayed:{queue_name}")  # type: ignore[assignment]
+            delayed_size: int = await self.client.zcard(f"queue:{queue_name}:delayed")  # type: ignore[assignment]
             size += delayed_size
 
-        # Note: in_flight not tracked in Redis driver (immediate ack on dequeue)
-        # include_in_flight parameter is ignored
+        if include_in_flight:
+            processing_size: int = await self.client.llen(f"queue:{queue_name}:processing")  # type: ignore[assignment]
+            size += processing_size
 
         return size
 
