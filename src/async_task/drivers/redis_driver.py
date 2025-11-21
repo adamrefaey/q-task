@@ -161,7 +161,7 @@ class RedisDriver(BaseDriver):
             pipe.lrem(processing_key, 1, receipt_handle)  # type: ignore[arg-type]
             pipe.lpush(main_key, receipt_handle)
             results = await pipe.execute()
-            
+
             # If LREM returned 0, the task wasn't in processing, so remove it from main queue
             # This handles the nack-after-ack case
             if results[0] == 0:
@@ -177,14 +177,11 @@ class RedisDriver(BaseDriver):
 
         Args:
             queue_name: Name of the queue
-            include_delayed: Include delayed tasks in count (default: False)
-            include_in_flight: Include in-flight tasks in count (default: False)
+            include_delayed: Include delayed tasks in count
+            include_in_flight: Include in-flight tasks in count
 
         Returns:
             Task count based on parameters
-
-        Note:
-            Now tracks in-flight tasks in processing list.
         """
 
         if self.client is None:

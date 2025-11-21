@@ -1,10 +1,11 @@
 from base64 import b64decode, b64encode
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 from aioboto3 import Session
 from types_aiobotocore_sqs import SQSClient
+from types_aiobotocore_sqs.literals import QueueAttributeFilterType
 
 from .base_driver import BaseDriver
 
@@ -264,8 +265,8 @@ class SQSDriver(BaseDriver):
 
         Args:
             queue_name: Queue name
-            include_delayed: Include delayed messages (default: False)
-            include_in_flight: Include in-flight messages (default: False)
+            include_delayed: Include delayed messages
+            include_in_flight: Include in-flight messages
 
         Returns:
             Approximate count based on parameters
@@ -273,7 +274,7 @@ class SQSDriver(BaseDriver):
         Note:
             APPROXIMATE only - may lag by a few seconds due to distributed nature.
             Good for monitoring, not for strict guarantees.
-            
+
             SQS provides separate attributes for each category:
             - ApproximateNumberOfMessages: Visible/ready messages
             - ApproximateNumberOfMessagesDelayed: Delayed messages
@@ -284,25 +285,26 @@ class SQSDriver(BaseDriver):
             assert self.client is not None
 
         queue_url = await self._get_queue_url(queue_name)
-        
+
         # Build attribute list based on parameters
         attributes = ["ApproximateNumberOfMessages"]
         if include_delayed:
             attributes.append("ApproximateNumberOfMessagesDelayed")
         if include_in_flight:
             attributes.append("ApproximateNumberOfMessagesNotVisible")
-        
+
         response = await self.client.get_queue_attributes(
-            QueueUrl=queue_url, AttributeNames=attributes
+            QueueUrl=queue_url,
+            AttributeNames=cast(list[QueueAttributeFilterType], attributes),
         )
 
         attrs = response.get("Attributes", {})
-        
+
         count = int(attrs.get("ApproximateNumberOfMessages", 0))
-        
+
         if include_delayed:
             count += int(attrs.get("ApproximateNumberOfMessagesDelayed", 0))
-        
+
         if include_in_flight:
             count += int(attrs.get("ApproximateNumberOfMessagesNotVisible", 0))
 
