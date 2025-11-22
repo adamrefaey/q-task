@@ -13,7 +13,8 @@ class MsgpackSerializer(BaseSerializer):
 
     Features:
     - ORM models serialized as lightweight references (class + PK)
-    - Custom type encoding (datetime, Decimal, UUID, bytes, sets)
+    - Custom type encoding (datetime, Decimal, UUID, sets)
+    - Native msgpack handling for bytes (use_bin_type=True)
     - Recursive processing of nested structures
     """
 
@@ -35,8 +36,6 @@ class MsgpackSerializer(BaseSerializer):
             return {"__decimal__": str(obj)}
         elif isinstance(obj, UUID):
             return {"__uuid__": str(obj)}
-        elif isinstance(obj, bytes):
-            return {"__bytes__": obj.hex()}
         elif isinstance(obj, set):
             return {"__set__": list(obj)}
         raise TypeError(f"Object of type {type(obj)} is not msgpack serializable")
@@ -52,8 +51,6 @@ class MsgpackSerializer(BaseSerializer):
                 return Decimal(obj["__decimal__"])
             elif "__uuid__" in obj:
                 return UUID(obj["__uuid__"])
-            elif "__bytes__" in obj:
-                return bytes.fromhex(obj["__bytes__"])
             elif "__set__" in obj:
                 return set(obj["__set__"])
         return obj
