@@ -27,7 +27,7 @@ import json
 from collections.abc import AsyncGenerator
 
 import aioboto3
-from pytest import fixture, main, mark
+from pytest import fixture, main, mark, raises
 
 from async_task.drivers.sqs_driver import SQSDriver
 
@@ -228,6 +228,276 @@ class TestSQSDriverWithLocalStack:
 
         # Assert
         assert size >= 3  # May be more if other tests are running
+
+    async def test_queue_size_with_delayed(self, sqs_driver: SQSDriver) -> None:
+        """Test getting queue size including delayed messages."""
+        # Arrange - Enqueue messages with delay
+        for i in range(2):
+            payload = {"task": f"delayed_task_{i}"}
+            task_data = json.dumps(payload).encode("utf-8")
+            await sqs_driver.enqueue(TEST_QUEUE_NAME, task_data, delay_seconds=5)
+
+        # Also enqueue immediate messages
+        for i in range(2):
+            payload = {"task": f"immediate_task_{i}"}
+            task_data = json.dumps(payload).encode("utf-8")
+            await sqs_driver.enqueue(TEST_QUEUE_NAME, task_data)
+
+        await asyncio.sleep(0.3)
+
+        # Act - Get size including delayed
+        size_with_delayed = await sqs_driver.get_queue_size(TEST_QUEUE_NAME, True, False)
+        size_without_delayed = await sqs_driver.get_queue_size(TEST_QUEUE_NAME, False, False)
+
+        # Assert
+        assert size_with_delayed >= 4
+        assert size_without_delayed >= 2
+        assert size_with_delayed >= size_without_delayed
+
+    async def test_queue_size_with_in_flight(self, sqs_driver: SQSDriver) -> None:
+        """Test getting queue size including in-flight messages."""
+        # Arrange - Enqueue messages
+        for i in range(3):
+            payload = {"task": f"task_{i}"}
+            task_data = json.dumps(payload).encode("utf-8")
+            await sqs_driver.enqueue(TEST_QUEUE_NAME, task_data)
+
+        await asyncio.sleep(0.3)
+
+        # Act - Dequeue but don't ack (messages become in-flight)
+        dequeued = []
+        for _ in range(2):
+            data = await sqs_driver.dequeue(TEST_QUEUE_NAME)
+            if data:
+                dequeued.append(data)
+
+        await asyncio.sleep(0.3)
+
+        # Get size including in-flight
+        size_with_in_flight = await sqs_driver.get_queue_size(TEST_QUEUE_NAME, False, True)
+        size_without_in_flight = await sqs_driver.get_queue_size(TEST_QUEUE_NAME, False, False)
+
+        # Assert
+        assert size_with_in_flight >= 3  # Should include in-flight messages
+        assert size_without_in_flight >= 1  # Only visible messages
+        assert size_with_in_flight >= size_without_in_flight
+
+        # Cleanup - ack the dequeued messages
+        for data in dequeued:
+            await sqs_driver.ack(TEST_QUEUE_NAME, data)
+
+    async def test_queue_size_with_all_options(self, sqs_driver: SQSDriver) -> None:
+        """Test getting queue size with both delayed and in-flight included."""
+        # Arrange - Enqueue immediate and delayed messages
+        for i in range(2):
+            payload = {"task": f"immediate_{i}"}
+            task_data = json.dumps(payload).encode("utf-8")
+            await sqs_driver.enqueue(TEST_QUEUE_NAME, task_data)
+
+        for i in range(2):
+            payload = {"task": f"delayed_{i}"}
+            task_data = json.dumps(payload).encode("utf-8")
+            await sqs_driver.enqueue(TEST_QUEUE_NAME, task_data, delay_seconds=5)
+
+        await asyncio.sleep(0.3)
+
+        # Dequeue one (becomes in-flight)
+        dequeued = await sqs_driver.dequeue(TEST_QUEUE_NAME)
+        assert dequeued is not None
+
+        await asyncio.sleep(0.3)
+
+        # Act - Get size with all options
+        size_all = await sqs_driver.get_queue_size(TEST_QUEUE_NAME, True, True)
+
+        # Assert
+        assert size_all >= 4  # Should include all: visible + delayed + in-flight
+
+        # Cleanup
+        await sqs_driver.ack(TEST_QUEUE_NAME, dequeued)
+
+    async def test_enqueue_delay_exceeds_limit(self, sqs_driver: SQSDriver) -> None:
+        """Test that enqueue raises ValueError when delay_seconds > 900."""
+        # Arrange
+        task_data = json.dumps({"task": "test"}).encode("utf-8")
+
+        # Act & Assert
+        with raises(ValueError, match="delay_seconds cannot exceed 900"):
+            await sqs_driver.enqueue(TEST_QUEUE_NAME, task_data, delay_seconds=901)
+
+        with raises(ValueError, match="delay_seconds cannot exceed 900"):
+            await sqs_driver.enqueue(TEST_QUEUE_NAME, task_data, delay_seconds=1000)
+
+    async def test_enqueue_auto_connect(self, aws_region: str) -> None:
+        """Test that enqueue auto-connects if client is None."""
+        # Arrange - Create driver but don't connect
+        driver = SQSDriver(
+            region_name=aws_region,
+            aws_access_key_id="test",
+            aws_secret_access_key="test",
+            endpoint_url=LOCALSTACK_ENDPOINT,
+            queue_url_prefix=f"{LOCALSTACK_ENDPOINT}/000000000000",
+        )
+
+        # Act - Enqueue without explicit connect
+        task_data = json.dumps({"task": "auto_connect_test"}).encode("utf-8")
+        await driver.enqueue(TEST_QUEUE_NAME, task_data)
+
+        # Assert - Client should be connected now
+        assert driver.client is not None
+
+        # Verify message was enqueued
+        result = await driver.dequeue(TEST_QUEUE_NAME)
+        assert result == task_data
+
+        # Cleanup
+        await driver.disconnect()
+
+    async def test_dequeue_auto_connect(self, aws_region: str) -> None:
+        """Test that dequeue auto-connects if client is None."""
+        # Arrange - Create driver, connect, enqueue, then disconnect
+        driver = SQSDriver(
+            region_name=aws_region,
+            aws_access_key_id="test",
+            aws_secret_access_key="test",
+            endpoint_url=LOCALSTACK_ENDPOINT,
+            queue_url_prefix=f"{LOCALSTACK_ENDPOINT}/000000000000",
+        )
+        await driver.connect()
+        task_data = json.dumps({"task": "auto_connect_dequeue"}).encode("utf-8")
+        await driver.enqueue(TEST_QUEUE_NAME, task_data)
+        await driver.disconnect()
+
+        # Act - Dequeue without explicit connect
+        result = await driver.dequeue(TEST_QUEUE_NAME)
+
+        # Assert - Client should be connected and message retrieved
+        assert driver.client is not None
+        assert result == task_data
+
+        # Cleanup
+        await driver.disconnect()
+
+    async def test_ack_auto_connect(self, aws_region: str) -> None:
+        """Test that ack auto-connects if client is None."""
+        # Arrange - Create driver, connect, enqueue, dequeue, then disconnect
+        driver = SQSDriver(
+            region_name=aws_region,
+            aws_access_key_id="test",
+            aws_secret_access_key="test",
+            endpoint_url=LOCALSTACK_ENDPOINT,
+            queue_url_prefix=f"{LOCALSTACK_ENDPOINT}/000000000000",
+        )
+        await driver.connect()
+        task_data = json.dumps({"task": "auto_connect_ack"}).encode("utf-8")
+        await driver.enqueue(TEST_QUEUE_NAME, task_data)
+        dequeued = await driver.dequeue(TEST_QUEUE_NAME)
+        assert dequeued is not None
+        await driver.disconnect()
+
+        # Act - Ack without explicit connect
+        await driver.ack(TEST_QUEUE_NAME, dequeued)
+
+        # Assert - Client should be connected
+        assert driver.client is not None
+
+        # Verify message was acked (shouldn't be available again)
+        await asyncio.sleep(0.2)
+        result = await driver.dequeue(TEST_QUEUE_NAME)
+        assert result is None
+
+        # Cleanup
+        await driver.disconnect()
+
+    async def test_nack_auto_connect(self, aws_region: str) -> None:
+        """Test that nack auto-connects if client is None."""
+        # Arrange - Create driver, connect, enqueue, dequeue
+        driver = SQSDriver(
+            region_name=aws_region,
+            aws_access_key_id="test",
+            aws_secret_access_key="test",
+            endpoint_url=LOCALSTACK_ENDPOINT,
+            queue_url_prefix=f"{LOCALSTACK_ENDPOINT}/000000000000",
+        )
+        await driver.connect()
+        task_data = json.dumps({"task": "auto_connect_nack"}).encode("utf-8")
+        await driver.enqueue(TEST_QUEUE_NAME, task_data)
+        dequeued = await driver.dequeue(TEST_QUEUE_NAME)
+        assert dequeued is not None
+        # Simulate client being None (but keep receipt handle in cache)
+        # This tests the auto-connect path in nack
+        original_client = driver.client
+        driver.client = None
+
+        # Act - Nack without explicit connect (should auto-connect)
+        await driver.nack(TEST_QUEUE_NAME, dequeued)
+
+        # Assert - Client should be connected (auto-connected)
+        assert driver.client is not None
+        assert driver.client is not original_client  # New client after auto-connect
+
+        # Verify message was nacked (should be available again after visibility timeout)
+        # Note: After nack, message becomes visible immediately (visibility timeout = 0)
+        await asyncio.sleep(0.5)
+        result = await driver.dequeue(TEST_QUEUE_NAME)
+        assert result is not None
+        assert result == task_data
+
+        # Cleanup
+        await driver.ack(TEST_QUEUE_NAME, result)
+        await driver.disconnect()
+
+    async def test_get_queue_size_auto_connect(self, aws_region: str) -> None:
+        """Test that get_queue_size auto-connects if client is None."""
+        # Arrange - Create driver, connect, enqueue, then disconnect
+        driver = SQSDriver(
+            region_name=aws_region,
+            aws_access_key_id="test",
+            aws_secret_access_key="test",
+            endpoint_url=LOCALSTACK_ENDPOINT,
+            queue_url_prefix=f"{LOCALSTACK_ENDPOINT}/000000000000",
+        )
+        await driver.connect()
+        task_data = json.dumps({"task": "auto_connect_size"}).encode("utf-8")
+        await driver.enqueue(TEST_QUEUE_NAME, task_data)
+        await driver.disconnect()
+
+        # Act - Get queue size without explicit connect
+        await asyncio.sleep(0.3)
+        size = await driver.get_queue_size(TEST_QUEUE_NAME, False, False)
+
+        # Assert - Client should be connected and size should be >= 1
+        assert driver.client is not None
+        assert size >= 1
+
+        # Cleanup
+        await driver.disconnect()
+
+    async def test_get_queue_url_without_prefix(self, aws_region: str) -> None:
+        """Test _get_queue_url when queue_url_prefix is None (API call path)."""
+        # Arrange - Create driver without queue_url_prefix
+        driver = SQSDriver(
+            region_name=aws_region,
+            aws_access_key_id="test",
+            aws_secret_access_key="test",
+            endpoint_url=LOCALSTACK_ENDPOINT,
+            queue_url_prefix=None,  # This will trigger API call path
+        )
+        await driver.connect()
+
+        # Act - Enqueue (which calls _get_queue_url internally)
+        task_data = json.dumps({"task": "api_path_test"}).encode("utf-8")
+        await driver.enqueue(TEST_QUEUE_NAME, task_data)
+
+        # Assert - Queue URL should be cached now
+        assert TEST_QUEUE_NAME in driver._queue_urls
+
+        # Verify message was enqueued
+        result = await driver.dequeue(TEST_QUEUE_NAME)
+        assert result == task_data
+
+        # Cleanup
+        await driver.disconnect()
 
 
 @mark.integration
