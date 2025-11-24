@@ -26,7 +26,7 @@ from time import time
 from pytest import fixture, main, mark
 from redis.asyncio import Redis
 
-from async_task.drivers import RedisDriver, maybe_await
+from async_task.drivers.redis_driver import RedisDriver, maybe_await
 
 # Test configuration
 REDIS_URL = "redis://localhost:6379"

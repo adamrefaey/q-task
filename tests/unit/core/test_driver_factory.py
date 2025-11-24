@@ -14,8 +14,11 @@ from unittest.mock import MagicMock, patch
 from pytest import main, mark, raises
 
 from async_task.config import Config, DriverType
-from async_task.drivers import MemoryDriver, PostgresDriver, RedisDriver, SQSDriver
-from async_task.drivers.driver_factory import DriverFactory
+from async_task.core.driver_factory import DriverFactory
+from async_task.drivers.memory_driver import MemoryDriver
+from async_task.drivers.postgres_driver import PostgresDriver
+from async_task.drivers.redis_driver import RedisDriver
+from async_task.drivers.sqs_driver import SQSDriver
 
 
 @mark.unit

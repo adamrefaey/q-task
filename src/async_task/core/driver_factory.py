@@ -1,7 +1,7 @@
 from typing import Any, get_args
 
 from ..config import Config, DriverType
-from .base_driver import BaseDriver
+from ..drivers.base_driver import BaseDriver
 
 
 class DriverFactory:
@@ -64,11 +64,11 @@ class DriverFactory:
         """
         match driver_type:
             case "memory":
-                from .memory_driver import MemoryDriver
+                from ..drivers.memory_driver import MemoryDriver
 
                 return MemoryDriver()
             case "redis":
-                from .redis_driver import RedisDriver
+                from ..drivers.redis_driver import RedisDriver
 
                 return RedisDriver(
                     url=kwargs.get("redis_url", "redis://localhost:6379"),
@@ -77,7 +77,7 @@ class DriverFactory:
                     max_connections=kwargs.get("redis_max_connections", 10),
                 )
             case "sqs":
-                from .sqs_driver import SQSDriver
+                from ..drivers.sqs_driver import SQSDriver
 
                 return SQSDriver(
                     region_name=kwargs.get("sqs_region", "us-east-1"),
@@ -86,7 +86,7 @@ class DriverFactory:
                     aws_secret_access_key=kwargs.get("aws_secret_access_key"),
                 )
             case "postgres":
-                from .postgres_driver import PostgresDriver
+                from ..drivers.postgres_driver import PostgresDriver
 
                 return PostgresDriver(
                     dsn=kwargs.get("postgres_dsn", "postgresql://user:pass@localhost/dbname"),

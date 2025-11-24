@@ -13,7 +13,7 @@ from collections.abc import AsyncGenerator
 
 from pytest import fixture, main, mark
 
-from async_task.drivers import MemoryDriver
+from async_task.drivers.memory_driver import MemoryDriver
 
 
 @fixture

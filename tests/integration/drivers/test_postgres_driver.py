@@ -29,7 +29,7 @@ from uuid import uuid4
 import asyncpg
 from pytest import fixture, main, mark
 
-from async_task.drivers import PostgresDriver
+from async_task.drivers.postgres_driver import PostgresDriver
 
 # Test configuration
 POSTGRES_DSN = "postgresql://test:test@localhost:5432/test_db"

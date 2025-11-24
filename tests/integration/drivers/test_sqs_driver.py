@@ -29,7 +29,7 @@ from collections.abc import AsyncGenerator
 import aioboto3
 from pytest import fixture, main, mark
 
-from async_task.drivers import SQSDriver
+from async_task.drivers.sqs_driver import SQSDriver
 
 # Test configuration
 TEST_REGION = "us-east-1"
