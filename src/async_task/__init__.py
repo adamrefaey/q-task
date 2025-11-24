@@ -1,7 +1,4 @@
-"""Async Task - Laravel-inspired task queue system for Python.
-
-A modern, async-first task queue system with multi-driver support.
-"""
+"""Async Task - A robust task queue system for Python with async-first design and multi-driver support (Memory/Postgres/Redis/AWS SQS) inspired by Laravel"""
 
 __version__ = "0.1.0"
 
