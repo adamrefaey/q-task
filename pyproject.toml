@@ -38,8 +38,8 @@ postgres = ["asyncpg>=0.30.0", "asyncpg-stubs>=0.30.0"]
 mysql = ["asyncmy>=0.2.10"]
 sqlite = ["aiosqlite>=0.21.0"]
 oracle = ["oracledb>=3.4.1"]
-sqlalchemy = ["sqlalchemy>=2.0.44"]
-django = ["django>=5.2.8"]
+sqlalchemy = ["sqlalchemy>=2.0.44", "greenlet>=3.2.4"]
+django = ["django>=5.2.8", "psycopg2-binary>=2.9.11"]
 tortoise = ["tortoise-orm>=0.25.1"]
 
 all = [

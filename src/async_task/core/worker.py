@@ -249,10 +249,11 @@ class Worker:
 
         Reconstruction process:
         1. Deserialize bytes to dictionary using queue serializer
-        2. Import task class from 'class' field (module.ClassName)
-        3. Create task instance without calling __init__
-        4. Restore task parameters from 'params' dict
-        5. Restore internal metadata (_task_id, _attempts, etc.)
+        2. Process params to fetch ORM models if serializer supports it
+        3. Import task class from 'class' field (module.ClassName)
+        4. Create task instance without calling __init__
+        5. Restore task parameters from 'params' dict
+        6. Restore internal metadata (_task_id, _attempts, etc.)
 
         Args:
             task_data: Serialized task bytes
@@ -264,7 +265,7 @@ class Worker:
             ImportError: If task class cannot be imported
             AttributeError: If task class not found in module
         """
-        data = self.serializer.deserialize(task_data)
+        data = await self.serializer.deserialize(task_data)
 
         # Import task class
         module_name, class_name = data["class"].rsplit(".", 1)

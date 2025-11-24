@@ -11,6 +11,6 @@ class BaseSerializer(Protocol):
         ...
 
     @abstractmethod
-    def deserialize(self, data: bytes) -> dict[str, Any]:
+    async def deserialize(self, data: bytes) -> dict[str, Any]:
         """Deserialize bytes to task data dictionary"""
         ...
