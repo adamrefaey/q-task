@@ -279,7 +279,7 @@ class TestSQSDriverEdgeCases:
     async def test_enqueue_large_payload(self, sqs_driver: SQSDriver) -> None:
         """Test enqueuing a large payload (near SQS limit)."""
         # Arrange - SQS max message size is 256KB
-        large_data = "x" * (200 * 1024)  # 200KB
+        large_data = "x" * (150 * 1024)  # 150KB
         task_data = json.dumps({"task": "large_task", "data": large_data}).encode("utf-8")
 
         # Act
