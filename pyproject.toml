@@ -41,9 +41,10 @@ oracle = ["oracledb>=3.4.1"]
 sqlalchemy = ["sqlalchemy>=2.0.44", "greenlet>=3.2.4"]
 django = ["django>=5.2.8", "psycopg2-binary>=2.9.11"]
 tortoise = ["tortoise-orm>=0.25.1"]
+fastapi = ["fastapi>=0.115.0"]
 
 all = [
-    "async-task[redis,sqs,postgres,mysql,sqlite,oracle,sqlalchemy,django,tortoise]",
+    "async-task[redis,sqs,postgres,mysql,sqlite,oracle,sqlalchemy,django,tortoise,fastapi]",
 ]
 
 [project.urls]
