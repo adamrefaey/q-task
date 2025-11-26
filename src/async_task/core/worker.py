@@ -1,8 +1,10 @@
 import asyncio
+import importlib.util
 import logging
 import signal
 from collections.abc import Sequence
 from datetime import datetime
+from pathlib import Path
 
 from ..drivers.base_driver import BaseDriver
 from ..serializers.base_serializer import BaseSerializer
@@ -133,34 +135,37 @@ class Worker:
                 continue
 
             # Try to get a task from queues (in priority order)
-            if (task_data := await self._fetch_task()) is None:
+            fetch_result = await self._fetch_task()
+            if fetch_result is None:
                 # No tasks available, sleep briefly then check again
                 # This prevents CPU spinning while still being responsive
                 # Note: asyncio.sleep(0) would yield to event loop without delay
                 await asyncio.sleep(0.1)
                 continue  # Loop continues - worker keeps checking for new tasks
 
+            task_data, queue_name = fetch_result
+
             # Create asyncio task to process task
-            task = asyncio.create_task(self._process_task(task_data))
+            task = asyncio.create_task(self._process_task(task_data, queue_name))
             self._tasks.add(task)
             task.add_done_callback(self._tasks.discard)
 
-    async def _fetch_task(self) -> bytes | None:
+    async def _fetch_task(self) -> tuple[bytes, str] | None:
         """Fetch next task from queues in round-robin order.
 
         Polls each queue in order until a task is found. This provides
         fair distribution across queues (first-listed queues have priority).
 
         Returns:
-            bytes: Serialized task data, or None if all queues empty
+            tuple[bytes, str]: (Serialized task data, queue name) or None if all queues empty
         """
         for queue_name in self.queues:
             task_data = await self.queue_driver.dequeue(queue_name)
             if task_data:
-                return task_data
+                return (task_data, queue_name)
         return None
 
-    async def _process_task(self, task_data: bytes) -> None:
+    async def _process_task(self, task_data: bytes, queue_name: str) -> None:
         """Process a single task with error handling and timeout support.
 
         Workflow:
@@ -170,12 +175,14 @@ class Worker:
         4. Increment processed task counter
 
         Error handling:
+        - DeserializationError: Re-enqueue raw task_data for retry
         - TimeoutError: Task exceeded configured timeout
         - Exception: General task failure (logged with stacktrace)
         - Both trigger retry logic via _handle_task_failure()
 
         Args:
             task_data: Serialized task bytes from queue
+            queue_name: Name of the queue the task came from
         """
         task: Task | None = None
 
@@ -193,19 +200,61 @@ class Worker:
             else:
                 await task.handle()
 
-            # Task succeeded - increment counter
+            # Task succeeded - acknowledge and remove from queue
             logger.info(f"Task {task._task_id} completed successfully")
+            try:
+                # Add timeout to ack to prevent hanging
+                await asyncio.wait_for(self.queue_driver.ack(queue_name, task_data), timeout=5.0)
+            except TimeoutError:
+                logger.error(
+                    f"Ack timeout for task {task._task_id} from queue '{queue_name}'. "
+                    f"Task completed but may remain in processing list."
+                )
+            except Exception as ack_error:
+                # Log ack error but don't fail the task - it already completed successfully
+                logger.error(
+                    f"Failed to acknowledge task {task._task_id} from queue '{queue_name}': {ack_error}"
+                )
+                logger.exception(ack_error)
             self._tasks_processed += 1
 
-        except TimeoutError:
-            assert task is not None
-            logger.error(f"Task {task._task_id} timed out")
-            await self._handle_task_failure(task, TimeoutError("Task exceeded timeout"))
+        except (ImportError, AttributeError, ValueError, TypeError) as e:
+            # Deserialization failure - re-enqueue raw task_data for retry
+            # This allows the task to be retried later (e.g., after code is fixed)
+            logger.error(
+                f"Failed to deserialize task from queue '{queue_name}': {e}. "
+                f"Re-enqueuing for retry."
+            )
+            logger.exception(e)
+            # Re-enqueue with a delay to avoid immediate retry loop
+            await self.queue_driver.enqueue(queue_name, task_data, delay_seconds=60)
+
+        except TimeoutError as e:
+            if task is None:
+                # TimeoutError during deserialization - treat as deserialization failure
+                logger.error(
+                    f"Deserialization timeout for task from queue '{queue_name}': {e}. "
+                    f"Re-enqueuing for retry."
+                )
+                logger.exception(e)
+                await self.queue_driver.enqueue(queue_name, task_data, delay_seconds=60)
+            else:
+                # TimeoutError during task execution - handle as task failure
+                logger.error(f"Task {task._task_id} timed out")
+                await self._handle_task_failure(task, TimeoutError("Task exceeded timeout"))
 
         except Exception as e:
-            assert task is not None
-            logger.exception(f"Task {task._task_id} failed: {e}")
-            await self._handle_task_failure(task, e)
+            if task is None:
+                # Unexpected error during deserialization that we didn't catch above
+                logger.error(
+                    f"Unexpected error deserializing task from queue '{queue_name}': {e}. "
+                    f"Re-enqueuing for retry."
+                )
+                logger.exception(e)
+                await self.queue_driver.enqueue(queue_name, task_data, delay_seconds=60)
+            else:
+                logger.exception(f"Task {task._task_id} failed: {e}")
+                await self._handle_task_failure(task, e)
 
         # Note: Python 3.11+ ExceptionGroup can be used to collect
         # multiple errors if task spawns subtasks
@@ -301,6 +350,50 @@ class Worker:
             task.timeout = metadata["timeout"]
         if "queue" in metadata:
             task.queue = metadata["queue"]
+
+        # For FunctionTask, reconstruct function reference from metadata
+        if class_name == "FunctionTask" and "func_module" in metadata and "func_name" in metadata:
+            func_module_name = metadata["func_module"]
+            func_name = metadata["func_name"]
+
+            # Handle __main__ module - load from file path
+            if func_module_name == "__main__" and "func_file" in metadata:
+                func_file = Path(metadata["func_file"])
+                # Use a unique module name based on file path to avoid conflicts
+                # and prevent re-execution of __main__ blocks
+                module_name = f"__main___{func_file.stem}_{hash(func_file)}"
+                spec = importlib.util.spec_from_file_location(module_name, func_file)
+                if spec is None or spec.loader is None:
+                    raise ImportError(f"Could not load module from file: {func_file}")
+                func_module = importlib.util.module_from_spec(spec)
+                # Set __name__ to the unique name to prevent __main__ block execution
+                func_module.__name__ = module_name
+                try:
+                    # Execute the module to populate it with the function
+                    spec.loader.exec_module(func_module)
+                except RuntimeError as e:
+                    # Catch RuntimeError from asyncio.run() or similar calls at module level
+                    # that try to create a new event loop when one is already running
+                    if "asyncio.run() cannot be called from a running event loop" in str(e):
+                        # This is expected when loading modules with asyncio.run() at module level
+                        # The function definition should still be available since function
+                        # definitions are executed before the asyncio.run() call
+                        logger.debug(
+                            f"Suppressed asyncio.run() error when loading module {func_file}: {e}"
+                        )
+                        # Verify the function exists despite the error
+                        if not hasattr(func_module, func_name):
+                            raise AttributeError(
+                                f"Function '{func_name}' not found in module {func_file} "
+                                f"after suppressing asyncio.run() error"
+                            ) from None
+                    else:
+                        # Re-raise other RuntimeErrors
+                        raise
+            else:
+                func_module = __import__(func_module_name, fromlist=[func_name])
+
+            task.func = getattr(func_module, func_name)
 
         return task
 

@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from pytest import main, mark, raises
+from pytest import main, mark
 
 from async_task.core.task import Task
 from async_task.core.worker import Worker
@@ -504,7 +504,7 @@ class TestWorkerProcessTask:
             patch.object(worker, "_deserialize_task", return_value=task) as mock_deserialize,
         ):
             # Act
-            await worker._process_task(task_data)
+            await worker._process_task(task_data, "test_queue")
 
         # Assert
         mock_deserialize.assert_called_once_with(task_data)
@@ -534,7 +534,7 @@ class TestWorkerProcessTask:
             ) as mock_handle_failure,
         ):
             # Act
-            await worker._process_task(task_data)
+            await worker._process_task(task_data, "test_queue")
 
         # Assert
         mock_handle_failure.assert_called_once()
@@ -553,7 +553,7 @@ class TestWorkerProcessTask:
 
         with patch.object(worker, "_deserialize_task", return_value=task):
             # Act
-            await worker._process_task(task_data)
+            await worker._process_task(task_data, "test_queue")
 
         # Assert
         assert worker._tasks_processed == 1
@@ -580,7 +580,7 @@ class TestWorkerProcessTask:
             ) as mock_handle_failure,
         ):
             # Act
-            await worker._process_task(task_data)
+            await worker._process_task(task_data, "test_queue")
 
         # Assert
         mock_handle_failure.assert_called_once()
@@ -596,20 +596,21 @@ class TestWorkerProcessTask:
         task_data = b"serialized_task"
         initial_count = worker._tasks_processed
 
-        # Deserialization failure will leave task as None
-        # The exception handler will fail on assert task is not None
-        # This will raise AssertionError which is NOT caught (it propagates)
-        # So we expect an AssertionError to be raised
-        with patch.object(
-            worker, "_deserialize_task", side_effect=ImportError("Cannot import task class")
+        # Deserialization failure should re-enqueue the task
+        with (
+            patch.object(
+                worker, "_deserialize_task", side_effect=ImportError("Cannot import task class")
+            ),
+            patch.object(worker.queue_driver, "enqueue", new_callable=AsyncMock) as mock_enqueue,
         ):
-            # Act & Assert - should raise AssertionError when task is None
-            with raises(AssertionError):
-                await worker._process_task(task_data)
+            # Act - should re-enqueue instead of raising
+            await worker._process_task(task_data, "test_queue")
 
         # Assert
         # Task counter should not increment on failure
         assert worker._tasks_processed == initial_count
+        # Task should be re-enqueued with 60 second delay
+        mock_enqueue.assert_called_once_with("test_queue", task_data, delay_seconds=60)
 
     @mark.asyncio
     async def test_process_task_increments_counter_on_success(self) -> None:
@@ -624,7 +625,7 @@ class TestWorkerProcessTask:
 
         with patch.object(worker, "_deserialize_task", return_value=task):
             # Act
-            await worker._process_task(task_data)
+            await worker._process_task(task_data, "test_queue")
 
         # Assert
         assert worker._tasks_processed == initial_count + 1
@@ -1310,9 +1311,9 @@ class TestWorkerIntegration:
         # Wrap _process_task to signal when it's done
         original_process_task = worker._process_task
 
-        async def monitored_process_task(task_data: bytes) -> None:
+        async def monitored_process_task(task_data: bytes, queue_name: str) -> None:
             try:
-                await original_process_task(task_data)
+                await original_process_task(task_data, queue_name)
             finally:
                 # Signal that processing is complete
                 # _handle_task_failure is awaited inside _process_task,
