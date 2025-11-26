@@ -15,6 +15,7 @@ from pytest import main, mark, raises
 
 from async_task.config import Config, DriverType
 from async_task.core.driver_factory import DriverFactory
+from async_task.drivers.mysql_driver import MySQLDriver
 from async_task.drivers.postgres_driver import PostgresDriver
 from async_task.drivers.redis_driver import RedisDriver
 from async_task.drivers.sqs_driver import SQSDriver
@@ -107,6 +108,39 @@ class TestDriverFactoryCreateFromConfig:
         )
         assert result == mock_instance
 
+    @patch("async_task.drivers.mysql_driver.MySQLDriver")
+    def test_create_from_config_with_mysql_driver(self, mock_mysql: MagicMock) -> None:
+        # Arrange
+        config = Config(
+            driver="mysql",
+            mysql_dsn="mysql://user:pass@testdb:3306/taskdb",
+            mysql_queue_table="custom_queue",
+            mysql_dead_letter_table="custom_dlq",
+            mysql_max_attempts=5,
+            mysql_retry_delay_seconds=120,
+            mysql_visibility_timeout_seconds=600,
+            mysql_min_pool_size=5,
+            mysql_max_pool_size=20,
+        )
+        mock_instance = MagicMock(spec=MySQLDriver)
+        mock_mysql.return_value = mock_instance
+
+        # Act
+        result = DriverFactory.create_from_config(config)
+
+        # Assert
+        mock_mysql.assert_called_once_with(
+            dsn="mysql://user:pass@testdb:3306/taskdb",
+            queue_table="custom_queue",
+            dead_letter_table="custom_dlq",
+            max_attempts=5,
+            retry_delay_seconds=120,
+            visibility_timeout_seconds=600,
+            min_pool_size=5,
+            max_pool_size=20,
+        )
+        assert result == mock_instance
+
     @patch("async_task.drivers.postgres_driver.PostgresDriver")
     @patch("async_task.drivers.redis_driver.RedisDriver")
     def test_create_from_config_with_driver_type_override(
@@ -144,6 +178,48 @@ class TestDriverFactoryCreateFromConfig:
         # Assert
         mock_postgres.assert_called_once()
         mock_sqs.assert_not_called()
+        assert result == mock_instance
+
+    @patch("async_task.drivers.mysql_driver.MySQLDriver")
+    @patch("async_task.drivers.postgres_driver.PostgresDriver")
+    def test_create_from_config_override_postgres_with_mysql(
+        self, mock_postgres: MagicMock, mock_mysql: MagicMock
+    ) -> None:
+        # Arrange
+        config = Config(
+            driver="postgres",
+            mysql_dsn="mysql://override:pass@localhost:3306/db",
+        )
+        mock_instance = MagicMock(spec=MySQLDriver)
+        mock_mysql.return_value = mock_instance
+
+        # Act
+        result = DriverFactory.create_from_config(config, driver_type="mysql")
+
+        # Assert
+        mock_mysql.assert_called_once()
+        mock_postgres.assert_not_called()
+        assert result == mock_instance
+
+    @patch("async_task.drivers.mysql_driver.MySQLDriver")
+    @patch("async_task.drivers.redis_driver.RedisDriver")
+    def test_create_from_config_override_mysql_with_redis(
+        self, mock_redis: MagicMock, mock_mysql: MagicMock
+    ) -> None:
+        # Arrange
+        config = Config(
+            driver="mysql",
+            redis_url="redis://override:6379",
+        )
+        mock_instance = MagicMock(spec=RedisDriver)
+        mock_redis.return_value = mock_instance
+
+        # Act
+        result = DriverFactory.create_from_config(config, driver_type="redis")
+
+        # Assert
+        mock_redis.assert_called_once()
+        mock_mysql.assert_not_called()
         assert result == mock_instance
 
 
@@ -289,6 +365,60 @@ class TestDriverFactoryCreate:
         )
         assert result == mock_instance
 
+    @patch("async_task.drivers.mysql_driver.MySQLDriver")
+    def test_create_mysql_driver_with_defaults(self, mock_mysql: MagicMock) -> None:
+        # Arrange
+        mock_instance = MagicMock(spec=MySQLDriver)
+        mock_mysql.return_value = mock_instance
+
+        # Act
+        result = DriverFactory.create("mysql")
+
+        # Assert
+        mock_mysql.assert_called_once_with(
+            dsn="mysql://user:pass@localhost:3306/dbname",
+            queue_table="task_queue",
+            dead_letter_table="dead_letter_queue",
+            max_attempts=3,
+            retry_delay_seconds=60,
+            visibility_timeout_seconds=300,
+            min_pool_size=10,
+            max_pool_size=10,
+        )
+        assert result == mock_instance
+
+    @patch("async_task.drivers.mysql_driver.MySQLDriver")
+    def test_create_mysql_driver_with_custom_params(self, mock_mysql: MagicMock) -> None:
+        # Arrange
+        mock_instance = MagicMock(spec=MySQLDriver)
+        mock_mysql.return_value = mock_instance
+
+        # Act
+        result = DriverFactory.create(
+            "mysql",
+            mysql_dsn="mysql://admin:secret@db.example.com:3306/prod",
+            mysql_queue_table="production_queue",
+            mysql_dead_letter_table="production_dlq",
+            mysql_max_attempts=10,
+            mysql_retry_delay_seconds=300,
+            mysql_visibility_timeout_seconds=1800,
+            mysql_min_pool_size=20,
+            mysql_max_pool_size=100,
+        )
+
+        # Assert
+        mock_mysql.assert_called_once_with(
+            dsn="mysql://admin:secret@db.example.com:3306/prod",
+            queue_table="production_queue",
+            dead_letter_table="production_dlq",
+            max_attempts=10,
+            retry_delay_seconds=300,
+            visibility_timeout_seconds=1800,
+            min_pool_size=20,
+            max_pool_size=100,
+        )
+        assert result == mock_instance
+
 
 @mark.unit
 class TestDriverFactoryErrorHandling:
@@ -377,6 +507,31 @@ class TestDriverFactoryParameterPassing:
         # Assert
         mock_postgres.assert_called_once_with(
             dsn="postgresql://minimal:pass@localhost/db",
+            queue_table="task_queue",  # Default
+            dead_letter_table="dead_letter_queue",  # Default
+            max_attempts=3,  # Default
+            retry_delay_seconds=60,  # Default
+            visibility_timeout_seconds=300,  # Default
+            min_pool_size=10,  # Default
+            max_pool_size=10,  # Default
+        )
+        assert result == mock_instance
+
+    @patch("async_task.drivers.mysql_driver.MySQLDriver")
+    def test_create_mysql_with_minimal_params(self, mock_mysql: MagicMock) -> None:
+        # Arrange
+        mock_instance = MagicMock(spec=MySQLDriver)
+        mock_mysql.return_value = mock_instance
+
+        # Act
+        result = DriverFactory.create(
+            "mysql",
+            mysql_dsn="mysql://minimal:pass@localhost:3306/db",
+        )
+
+        # Assert
+        mock_mysql.assert_called_once_with(
+            dsn="mysql://minimal:pass@localhost:3306/db",
             queue_table="task_queue",  # Default
             dead_letter_table="dead_letter_queue",  # Default
             max_attempts=3,  # Default
@@ -489,6 +644,39 @@ class TestDriverFactoryConfigIntegration:
         )
         assert result == mock_instance
 
+    @patch("async_task.drivers.mysql_driver.MySQLDriver")
+    def test_all_mysql_config_fields_passed_correctly(self, mock_mysql: MagicMock) -> None:
+        # Arrange - create config with all mysql fields customized
+        config = Config(
+            driver="mysql",
+            mysql_dsn="mysql://test:test@testhost:3306/testdb",
+            mysql_queue_table="test_queue",
+            mysql_dead_letter_table="test_dlq",
+            mysql_max_attempts=7,
+            mysql_retry_delay_seconds=180,
+            mysql_visibility_timeout_seconds=900,
+            mysql_min_pool_size=15,
+            mysql_max_pool_size=50,
+        )
+        mock_instance = MagicMock(spec=MySQLDriver)
+        mock_mysql.return_value = mock_instance
+
+        # Act
+        result = DriverFactory.create_from_config(config)
+
+        # Assert - all fields should be passed through
+        mock_mysql.assert_called_once_with(
+            dsn="mysql://test:test@testhost:3306/testdb",
+            queue_table="test_queue",
+            dead_letter_table="test_dlq",
+            max_attempts=7,
+            retry_delay_seconds=180,
+            visibility_timeout_seconds=900,
+            min_pool_size=15,
+            max_pool_size=50,
+        )
+        assert result == mock_instance
+
 
 @mark.unit
 class TestDriverFactoryEdgeCases:
@@ -556,6 +744,26 @@ class TestDriverFactoryEdgeCases:
         assert call_kwargs["max_pool_size"] == 1000
         assert result == mock_instance
 
+    @patch("async_task.drivers.mysql_driver.MySQLDriver")
+    def test_boundary_pool_sizes_mysql(self, mock_mysql: MagicMock) -> None:
+        # Arrange
+        mock_instance = MagicMock(spec=MySQLDriver)
+        mock_mysql.return_value = mock_instance
+
+        # Act - test with same min and max pool size
+        result = DriverFactory.create(
+            "mysql",
+            mysql_min_pool_size=1,
+            mysql_max_pool_size=1000,
+        )
+
+        # Assert
+        mock_mysql.assert_called_once()
+        call_kwargs = mock_mysql.call_args[1]
+        assert call_kwargs["min_pool_size"] == 1
+        assert call_kwargs["max_pool_size"] == 1000
+        assert result == mock_instance
+
     @patch("async_task.drivers.redis_driver.RedisDriver")
     def test_kwargs_get_method_with_fallback(self, mock_redis: MagicMock) -> None:
         # Arrange
@@ -576,6 +784,34 @@ class TestDriverFactoryEdgeCases:
             password=None,
             db=0,
             max_connections=10,
+        )
+        assert result == mock_instance
+
+    @patch("async_task.drivers.mysql_driver.MySQLDriver")
+    def test_mysql_ignores_unrelated_kwargs(self, mock_mysql: MagicMock) -> None:
+        # Arrange
+        mock_instance = MagicMock(spec=MySQLDriver)
+        mock_mysql.return_value = mock_instance
+
+        # Act - pass unrelated kwargs that shouldn't affect MySQL
+        result = DriverFactory.create(
+            "mysql",
+            redis_url="should_be_ignored",
+            sqs_region="should_be_ignored",
+            postgres_dsn="should_be_ignored",
+            unrelated_param="should_be_ignored",
+        )
+
+        # Assert - only MySQL params should be used
+        mock_mysql.assert_called_once_with(
+            dsn="mysql://user:pass@localhost:3306/dbname",
+            queue_table="task_queue",
+            dead_letter_table="dead_letter_queue",
+            max_attempts=3,
+            retry_delay_seconds=60,
+            visibility_timeout_seconds=300,
+            min_pool_size=10,
+            max_pool_size=10,
         )
         assert result == mock_instance
 
