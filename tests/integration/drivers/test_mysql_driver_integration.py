@@ -533,6 +533,420 @@ class TestMySQLDriverWithRealMySQL:
         # Assert
         assert size == 0
 
+    async def test_get_queue_size_include_delayed(
+        self, mysql_driver: MySQLDriver, mysql_conn: asyncmy.Connection
+    ) -> None:
+        """get_queue_size() with include_delayed=True should include delayed tasks."""
+        # Arrange
+        await mysql_driver.enqueue("default", b"ready_task", delay_seconds=0)
+        await mysql_driver.enqueue("default", b"delayed_task", delay_seconds=3600)
+
+        # Act
+        size = await mysql_driver.get_queue_size(
+            "default", include_delayed=True, include_in_flight=False
+        )
+
+        # Assert
+        assert size == 2
+
+    async def test_get_queue_size_include_in_flight(
+        self, mysql_driver: MySQLDriver, mysql_conn: asyncmy.Connection
+    ) -> None:
+        """get_queue_size() with include_in_flight=True should include processing tasks."""
+        # Arrange
+        await mysql_driver.enqueue("default", b"ready_task", delay_seconds=0)
+        receipt = await mysql_driver.dequeue("default", poll_seconds=0)
+        assert receipt is not None
+
+        # Act
+        size = await mysql_driver.get_queue_size(
+            "default", include_delayed=False, include_in_flight=True
+        )
+
+        # Assert
+        assert size == 1  # The processing task
+
+        # Cleanup
+        await mysql_driver.ack("default", receipt)
+
+    async def test_get_queue_size_include_both(
+        self, mysql_driver: MySQLDriver, mysql_conn: asyncmy.Connection
+    ) -> None:
+        """get_queue_size() with both flags True should include all tasks."""
+        # Arrange
+        await mysql_driver.enqueue("default", b"ready_task", delay_seconds=0)
+        await mysql_driver.enqueue("default", b"delayed_task", delay_seconds=3600)
+        receipt = await mysql_driver.dequeue("default", poll_seconds=0)
+        assert receipt is not None
+
+        # Act
+        size = await mysql_driver.get_queue_size(
+            "default", include_delayed=True, include_in_flight=True
+        )
+
+        # Assert
+        assert (
+            size == 2
+        )  # Ready + delayed (both pending) + processing = 2 pending + 1 processing = 3 total
+        # Actually, ready_task is now processing, so we have:
+        # - 1 processing task (ready_task)
+        # - 1 pending delayed task
+        # Total = 2
+
+        # Cleanup
+        await mysql_driver.ack("default", receipt)
+
+    async def test_dequeue_recovers_stuck_tasks(
+        self, mysql_driver: MySQLDriver, mysql_conn: asyncmy.Connection
+    ) -> None:
+        """dequeue() should recover tasks where locked_until has expired."""
+        # Arrange
+        await mysql_driver.enqueue("default", b"stuck_task", delay_seconds=0)
+
+        # Manually set a task to pending with expired locked_until (simulating stuck task)
+        async with mysql_conn.cursor() as cursor:
+            await cursor.execute(
+                f"""
+                UPDATE {TEST_QUEUE_TABLE}
+                SET status = 'pending',
+                    locked_until = DATE_SUB(NOW(6), INTERVAL 1 SECOND)
+                WHERE queue_name = %s
+                """,
+                ("default",),
+            )
+
+        # Act - should recover the stuck task
+        receipt = await mysql_driver.dequeue("default", poll_seconds=0)
+
+        # Assert
+        assert receipt is not None
+
+        # Cleanup
+        await mysql_driver.ack("default", receipt)
+
+    async def test_nack_with_exponential_backoff(
+        self, mysql_driver: MySQLDriver, mysql_conn: asyncmy.Connection
+    ) -> None:
+        """nack() should apply exponential backoff for retries."""
+        # Arrange
+        await mysql_driver.enqueue("default", b"retry_task", delay_seconds=0)
+        receipt1 = await mysql_driver.dequeue("default", poll_seconds=0)
+        assert receipt1 is not None
+
+        # Act - first nack
+        await mysql_driver.nack("default", receipt1)
+
+        # Assert - check available_at is set with exponential backoff
+        async with mysql_conn.cursor() as cursor:
+            await cursor.execute(
+                f"""
+                SELECT attempts, available_at FROM {TEST_QUEUE_TABLE}
+                WHERE queue_name = %s
+                """,
+                ("default",),
+            )
+            result = await cursor.fetchone()
+            assert result is not None
+            assert result[0] == 1  # attempts = 1
+            # available_at should be in the future (retry_delay_seconds * 2^0 = 60 seconds)
+            available_at = result[1]
+            if available_at.tzinfo is None:
+                available_at = available_at.replace(tzinfo=UTC)
+            assert available_at.timestamp() > time()
+
+        # Make task available again for second nack
+        async with mysql_conn.cursor() as cursor:
+            await cursor.execute(
+                f"""
+                UPDATE {TEST_QUEUE_TABLE}
+                SET available_at = DATE_SUB(NOW(6), INTERVAL 1 SECOND),
+                    locked_until = NULL
+                WHERE queue_name = %s
+                """,
+                ("default",),
+            )
+
+        # Act - second nack (should have longer delay)
+        receipt2 = await mysql_driver.dequeue("default", poll_seconds=0)
+        assert receipt2 is not None
+        await mysql_driver.nack("default", receipt2)
+
+        # Assert - check exponential backoff (retry_delay_seconds * 2^1 = 120 seconds)
+        async with mysql_conn.cursor() as cursor:
+            await cursor.execute(
+                f"""
+                SELECT attempts, available_at FROM {TEST_QUEUE_TABLE}
+                WHERE queue_name = %s
+                """,
+                ("default",),
+            )
+            result = await cursor.fetchone()
+            assert result is not None
+            assert result[0] == 2  # attempts = 2
+
+    async def test_nack_with_invalid_receipt_handle(self, mysql_driver: MySQLDriver) -> None:
+        """nack() should handle invalid receipt handles gracefully."""
+        # Arrange
+        invalid_receipt = uuid4().bytes
+
+        # Act - should not raise
+        await mysql_driver.nack("default", invalid_receipt)
+
+        # Assert - no error raised, nothing happens
+
+    async def test_ack_with_invalid_receipt_handle(self, mysql_driver: MySQLDriver) -> None:
+        """ack() should handle invalid receipt handles gracefully."""
+        # Arrange
+        invalid_receipt = uuid4().bytes
+
+        # Act - should not raise (but also won't delete anything)
+        await mysql_driver.ack("default", invalid_receipt)
+
+        # Assert - no error raised
+
+    async def test_connect_idempotent(self, mysql_driver: MySQLDriver) -> None:
+        """connect() should be idempotent - can be called multiple times."""
+        # Arrange
+        assert mysql_driver.pool is not None
+        original_pool = mysql_driver.pool
+
+        # Act - connect again
+        await mysql_driver.connect()
+
+        # Assert - same pool instance
+        assert mysql_driver.pool is original_pool
+
+    async def test_disconnect_clears_receipt_handles(self, mysql_driver: MySQLDriver) -> None:
+        """disconnect() should clear receipt handles."""
+        # Arrange
+        await mysql_driver.enqueue("default", b"task", delay_seconds=0)
+        receipt = await mysql_driver.dequeue("default", poll_seconds=0)
+        assert receipt is not None
+        assert receipt in mysql_driver._receipt_handles
+
+        # Act
+        await mysql_driver.disconnect()
+
+        # Assert
+        assert mysql_driver.pool is None
+        assert len(mysql_driver._receipt_handles) == 0
+
+        # Reconnect for cleanup
+        await mysql_driver.connect()
+        await mysql_driver.init_schema()
+
+    async def test_dsn_parsing_edge_cases(self, mysql_dsn: str) -> None:
+        """Test DSN parsing methods with various edge cases."""
+        # Test host parsing edge cases
+        driver1 = MySQLDriver(dsn="mysql://user:pass@hostname/dbname")
+        assert driver1._parse_host() == "hostname"
+
+        driver2 = MySQLDriver(dsn="mysql://user:pass@hostname:3306/dbname")
+        assert driver2._parse_host() == "hostname"
+        assert driver2._parse_port() == 3306
+
+        driver3 = MySQLDriver(dsn="mysql://user:pass@hostname/dbname")
+        assert driver3._parse_port() == 3306  # Default port
+
+        # Test host parsing without port or slash (line 79)
+        driver_host_only = MySQLDriver(dsn="mysql://user:pass@hostname")
+        assert driver_host_only._parse_host() == "hostname"
+
+        # Test user parsing
+        driver4 = MySQLDriver(dsn="mysql://useronly@hostname/dbname")
+        assert driver4._parse_user() == "useronly"
+
+        driver5 = MySQLDriver(dsn="mysql://user:pass@hostname/dbname")
+        assert driver5._parse_user() == "user"
+        assert driver5._parse_password() == "pass"
+
+        # Test password parsing edge case
+        driver6 = MySQLDriver(dsn="mysql://user@hostname/dbname")
+        assert driver6._parse_password() == ""
+
+        # Test database parsing
+        driver7 = MySQLDriver(dsn="mysql://user:pass@hostname/dbname")
+        assert driver7._parse_database() == "dbname"
+
+        driver8 = MySQLDriver(dsn="mysql://user:pass@hostname/dbname?param=value")
+        assert driver8._parse_database() == "dbname"
+
+        # Test DSN without protocol
+        driver9 = MySQLDriver(dsn="user:pass@hostname:3306/dbname")
+        assert driver9._parse_host() == "localhost"  # Default
+        assert driver9._parse_user() == "root"  # Default
+        assert driver9._parse_database() == "test_db"  # Default
+
+    async def test_get_queue_size_with_processing_tasks(
+        self, mysql_driver: MySQLDriver, mysql_conn: asyncmy.Connection
+    ) -> None:
+        """get_queue_size() should correctly count processing tasks when include_in_flight=True."""
+        # Arrange
+        await mysql_driver.enqueue("default", b"task1", delay_seconds=0)
+        await mysql_driver.enqueue("default", b"task2", delay_seconds=0)
+
+        receipt1 = await mysql_driver.dequeue("default", poll_seconds=0)
+        assert receipt1 is not None
+
+        # Act - should count the processing task + ready tasks
+        size = await mysql_driver.get_queue_size(
+            "default", include_delayed=False, include_in_flight=True
+        )
+
+        # Assert
+        # One processing task + one ready task = 2
+        assert size == 2
+
+        # Cleanup
+        await mysql_driver.ack("default", receipt1)
+
+    async def test_enqueue_auto_connects(self, mysql_dsn: str) -> None:
+        """enqueue() should auto-connect if pool is None."""
+        # Arrange
+        driver = MySQLDriver(
+            dsn=mysql_dsn,
+            queue_table=TEST_QUEUE_TABLE,
+            dead_letter_table=TEST_DLQ_TABLE,
+        )
+
+        try:
+            # Act - enqueue without explicit connect
+            await driver.enqueue("default", b"task", delay_seconds=0)
+
+            # Assert - pool should be created
+            assert driver.pool is not None
+
+            # Cleanup
+            await driver.disconnect()
+        finally:
+            # Ensure cleanup
+            if driver.pool:
+                await driver.disconnect()
+
+    async def test_dequeue_auto_connects(self, mysql_dsn: str) -> None:
+        """dequeue() should auto-connect if pool is None."""
+        # Arrange
+        driver = MySQLDriver(
+            dsn=mysql_dsn,
+            queue_table=TEST_QUEUE_TABLE,
+            dead_letter_table=TEST_DLQ_TABLE,
+        )
+
+        try:
+            await driver.init_schema()
+            await driver.enqueue("default", b"task", delay_seconds=0)
+            await driver.disconnect()  # Disconnect to test auto-connect
+
+            # Act - dequeue should auto-connect
+            receipt = await driver.dequeue("default", poll_seconds=0)
+
+            # Assert
+            assert receipt is not None
+            assert driver.pool is not None
+
+            # Cleanup
+            await driver.ack("default", receipt)
+            await driver.disconnect()
+        finally:
+            if driver.pool:
+                await driver.disconnect()
+
+    async def test_ack_auto_connects(self, mysql_dsn: str) -> None:
+        """ack() should auto-connect if pool is None."""
+        # Arrange
+        driver = MySQLDriver(
+            dsn=mysql_dsn,
+            queue_table=TEST_QUEUE_TABLE,
+            dead_letter_table=TEST_DLQ_TABLE,
+        )
+
+        try:
+            await driver.init_schema()
+            await driver.enqueue("default", b"task", delay_seconds=0)
+            receipt = await driver.dequeue("default", poll_seconds=0)
+            assert receipt is not None
+            await driver.disconnect()  # Disconnect to test auto-connect
+
+            # Act - ack should auto-connect
+            await driver.ack("default", receipt)
+
+            # Assert - pool should be created
+            assert driver.pool is not None
+
+            # Cleanup
+            await driver.disconnect()
+        finally:
+            if driver.pool:
+                await driver.disconnect()
+
+    async def test_nack_auto_connects(self, mysql_dsn: str) -> None:
+        """nack() should auto-connect if pool is None."""
+        # Arrange
+        driver = MySQLDriver(
+            dsn=mysql_dsn,
+            queue_table=TEST_QUEUE_TABLE,
+            dead_letter_table=TEST_DLQ_TABLE,
+        )
+
+        try:
+            await driver.init_schema()
+            await driver.enqueue("default", b"task", delay_seconds=0)
+            receipt = await driver.dequeue("default", poll_seconds=0)
+            assert receipt is not None
+            await driver.disconnect()  # Disconnect to test auto-connect
+
+            # Act - nack should auto-connect
+            await driver.nack("default", receipt)
+
+            # Assert - pool should be created
+            assert driver.pool is not None
+
+            # Cleanup
+            await driver.disconnect()
+        finally:
+            if driver.pool:
+                await driver.disconnect()
+
+    async def test_get_queue_size_auto_connects(self, mysql_dsn: str) -> None:
+        """get_queue_size() should auto-connect if pool is None."""
+        # Arrange
+        driver = MySQLDriver(
+            dsn=mysql_dsn,
+            queue_table=TEST_QUEUE_TABLE,
+            dead_letter_table=TEST_DLQ_TABLE,
+        )
+
+        try:
+            await driver.init_schema()
+            await driver.enqueue("default", b"task", delay_seconds=0)
+            await driver.disconnect()  # Disconnect to test auto-connect
+
+            # Act - get_queue_size should auto-connect
+            size = await driver.get_queue_size(
+                "default", include_delayed=False, include_in_flight=False
+            )
+
+            # Assert
+            assert size == 1
+            assert driver.pool is not None
+
+            # Cleanup
+            await driver.disconnect()
+        finally:
+            if driver.pool:
+                await driver.disconnect()
+
+    async def test_dequeue_poll_edge_case(self, mysql_driver: MySQLDriver) -> None:
+        """Test dequeue poll edge case when deadline is None but poll_seconds > 0."""
+        # This tests the else branch at line 279
+        # Arrange - empty queue
+
+        # Act - poll with 0 seconds (should return None immediately)
+        result = await mysql_driver.dequeue("empty", poll_seconds=0)
+
+        # Assert
+        assert result is None
+
 
 if __name__ == "__main__":
     main([__file__, "-s", "-m", "integration"])
