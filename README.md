@@ -270,10 +270,19 @@ export AWS_SECRET_ACCESS_KEY=your_secret_key
 
 #### Programmatic Configuration
 
-```python
-from async_task.config import Config, set_global_config
+You can configure Async Task programmatically using `set_global_config()` or `Config.from_env()`. All configuration options can be passed as keyword arguments, and they override environment variables and defaults.
 
-# Option 1: Configure from environment with overrides
+**Configuration Precedence (highest to lowest):**
+1. Keyword arguments to `set_global_config()` or `Config.from_env()`
+2. Environment variables
+3. Default values
+
+**Using `set_global_config()`:**
+
+```python
+from async_task.config import set_global_config
+
+# Basic Redis configuration
 set_global_config(
     driver='redis',
     redis_url='redis://localhost:6379',
@@ -281,10 +290,158 @@ set_global_config(
     default_max_retries=3
 )
 
-# Option 2: Create a Config object directly
+# PostgreSQL with custom settings
+set_global_config(
+    driver='postgres',
+    postgres_dsn='postgresql://user:pass@localhost:5432/mydb',
+    postgres_queue_table='my_queue',
+    postgres_max_attempts=5,
+    postgres_min_pool_size=5,
+    postgres_max_pool_size=20
+)
+
+# SQS configuration
+set_global_config(
+    driver='sqs',
+    sqs_region='us-west-2',
+    sqs_queue_url_prefix='https://sqs.us-west-2.amazonaws.com/123456789/',
+    aws_access_key_id='your_key',
+    aws_secret_access_key='your_secret'
+)
+```
+
+**Using `Config.from_env()`:**
+
+```python
+from async_task.config import Config
+
+# Create config with overrides
 config = Config.from_env(
     driver='redis',
     redis_url='redis://localhost:6379'
+)
+```
+
+**Complete Configuration Options:**
+
+All options available for `set_global_config()` and `Config.from_env()`:
+
+**General Options:**
+- `driver` (str): Queue driver. Choices: `"redis"`, `"sqs"`, `"memory"`, `"postgres"`
+  - Env var: `ASYNC_TASK_DRIVER`
+  - Default: `"redis"`
+- `default_queue` (str): Default queue name for tasks
+  - Env var: `ASYNC_TASK_DEFAULT_QUEUE`
+  - Default: `"default"`
+- `default_max_retries` (int): Default maximum retry attempts for tasks
+  - Env var: `ASYNC_TASK_MAX_RETRIES`
+  - Default: `3`
+- `default_retry_delay` (int): Default retry delay in seconds
+  - Env var: `ASYNC_TASK_RETRY_DELAY`
+  - Default: `60`
+- `default_timeout` (int | None): Default task timeout in seconds (None = no timeout)
+  - Env var: `ASYNC_TASK_TIMEOUT`
+  - Default: `None`
+
+**Redis Options:**
+- `redis_url` (str): Redis connection URL
+  - Env var: `ASYNC_TASK_REDIS_URL`
+  - Default: `"redis://localhost:6379"`
+- `redis_password` (str | None): Redis password
+  - Env var: `ASYNC_TASK_REDIS_PASSWORD`
+  - Default: `None`
+- `redis_db` (int): Redis database number (0-15)
+  - Env var: `ASYNC_TASK_REDIS_DB`
+  - Default: `0`
+- `redis_max_connections` (int): Maximum number of connections in Redis pool
+  - Env var: `ASYNC_TASK_REDIS_MAX_CONNECTIONS`
+  - Default: `10`
+
+**PostgreSQL Options:**
+- `postgres_dsn` (str): PostgreSQL connection DSN
+  - Env var: `ASYNC_TASK_POSTGRES_DSN`
+  - Default: `"postgresql://test:test@localhost:5432/test_db"`
+- `postgres_queue_table` (str): PostgreSQL queue table name
+  - Env var: `ASYNC_TASK_POSTGRES_QUEUE_TABLE`
+  - Default: `"task_queue"`
+- `postgres_dead_letter_table` (str): PostgreSQL dead letter table name
+  - Env var: `ASYNC_TASK_POSTGRES_DEAD_LETTER_TABLE`
+  - Default: `"dead_letter_queue"`
+- `postgres_max_attempts` (int): Maximum attempts before moving to dead letter queue
+  - Env var: `ASYNC_TASK_POSTGRES_MAX_ATTEMPTS`
+  - Default: `3`
+- `postgres_retry_delay_seconds` (int): Retry delay in seconds for PostgreSQL driver
+  - Env var: `ASYNC_TASK_POSTGRES_RETRY_DELAY_SECONDS`
+  - Default: `60`
+- `postgres_visibility_timeout_seconds` (int): Visibility timeout in seconds
+  - Env var: `ASYNC_TASK_POSTGRES_VISIBILITY_TIMEOUT_SECONDS`
+  - Default: `300`
+- `postgres_min_pool_size` (int): Minimum connection pool size
+  - Env var: `ASYNC_TASK_POSTGRES_MIN_POOL_SIZE`
+  - Default: `10`
+- `postgres_max_pool_size` (int): Maximum connection pool size
+  - Env var: `ASYNC_TASK_POSTGRES_MAX_POOL_SIZE`
+  - Default: `10`
+
+**SQS Options:**
+- `sqs_region` (str): AWS SQS region
+  - Env var: `ASYNC_TASK_SQS_REGION`
+  - Default: `"us-east-1"`
+- `sqs_queue_url_prefix` (str | None): SQS queue URL prefix
+  - Env var: `ASYNC_TASK_SQS_QUEUE_PREFIX`
+  - Default: `None`
+- `aws_access_key_id` (str | None): AWS access key ID
+  - Env var: `AWS_ACCESS_KEY_ID`
+  - Default: `None` (uses AWS credential chain)
+- `aws_secret_access_key` (str | None): AWS secret access key
+  - Env var: `AWS_SECRET_ACCESS_KEY`
+  - Default: `None` (uses AWS credential chain)
+
+**Examples:**
+
+```python
+from async_task.config import set_global_config
+
+# Complete Redis setup
+set_global_config(
+    driver='redis',
+    redis_url='redis://localhost:6379',
+    redis_password='secret',
+    redis_db=1,
+    redis_max_connections=20,
+    default_queue='high-priority',
+    default_max_retries=5,
+    default_retry_delay=120,
+    default_timeout=300
+)
+
+# Complete PostgreSQL setup
+set_global_config(
+    driver='postgres',
+    postgres_dsn='postgresql://user:pass@localhost:5432/mydb',
+    postgres_queue_table='my_task_queue',
+    postgres_dead_letter_table='my_dlq',
+    postgres_max_attempts=5,
+    postgres_retry_delay_seconds=120,
+    postgres_visibility_timeout_seconds=600,
+    postgres_min_pool_size=5,
+    postgres_max_pool_size=25
+)
+
+# Complete SQS setup
+set_global_config(
+    driver='sqs',
+    sqs_region='us-west-2',
+    sqs_queue_url_prefix='https://sqs.us-west-2.amazonaws.com/123456789/',
+    aws_access_key_id='AKIAIOSFODNN7EXAMPLE',
+    aws_secret_access_key='wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY'
+)
+
+# Memory driver (for development/testing)
+set_global_config(
+    driver='memory',
+    default_queue='default',
+    default_max_retries=3
 )
 ```
 
@@ -749,7 +906,7 @@ kill -TERM <worker_pid>
 
 | Variable                   | Default   | Description                                        |
 | -------------------------- | --------- | -------------------------------------------------- |
-| `ASYNC_TASK_DRIVER`        | `memory`  | Queue driver: `memory`, `redis`, `postgres`, `sqs` |
+| `ASYNC_TASK_DRIVER`        | `redis`   | Queue driver: `memory`, `redis`, `postgres`, `sqs` |
 | `ASYNC_TASK_DEFAULT_QUEUE` | `default` | Default queue name                                 |
 | `ASYNC_TASK_MAX_RETRIES`   | `3`       | Default max retry attempts                         |
 | `ASYNC_TASK_RETRY_DELAY`   | `60`      | Default retry delay (seconds)                      |
@@ -766,9 +923,9 @@ kill -TERM <worker_pid>
 
 ### PostgreSQL Configuration
 
-| Variable                                         | Default                                   | Description                  |
-| ------------------------------------------------ | ----------------------------------------- | ---------------------------- |
-| `ASYNC_TASK_POSTGRES_DSN`                        | `postgresql://user:pass@localhost/dbname` | PostgreSQL connection string |
+| Variable                                         | Default                                          | Description                  |
+| ------------------------------------------------ | ------------------------------------------------ | ---------------------------- |
+| `ASYNC_TASK_POSTGRES_DSN`                        | `postgresql://test:test@localhost:5432/test_db` | PostgreSQL connection string |
 | `ASYNC_TASK_POSTGRES_QUEUE_TABLE`                | `task_queue`                              | Queue table name             |
 | `ASYNC_TASK_POSTGRES_DEAD_LETTER_TABLE`          | `dead_letter_queue`                       | Dead letter table name       |
 | `ASYNC_TASK_POSTGRES_MAX_ATTEMPTS`               | `3`                                       | Max attempts before DLQ      |
@@ -790,6 +947,8 @@ kill -TERM <worker_pid>
 
 ## CLI Reference
 
+The Async Task CLI provides commands for managing task queues and workers. All configuration options can be set via environment variables or CLI arguments, with CLI arguments taking precedence.
+
 ### Worker Command
 
 Start a worker to process tasks from queues.
@@ -798,25 +957,53 @@ Start a worker to process tasks from queues.
 python -m async_task worker [OPTIONS]
 ```
 
-**Options:**
+**General Options:**
 
-- `--driver` – Queue driver: `redis`, `postgres`, `sqs`, `memory`
-- `--queues` – Comma-separated queue names (priority order)
-- `--concurrency` – Max concurrent tasks (default: 10)
-- `--redis-url` – Redis connection URL
-- `--redis-password` – Redis password
-- `--redis-db` – Redis database number
-- `--postgres-dsn` – PostgreSQL connection string
-- `--sqs-region` – AWS region
-- `--sqs-queue-url-prefix` – SQS queue URL prefix
+- `--driver DRIVER` – Queue driver to use. Choices: `redis`, `sqs`, `memory`, `postgres`
+  - Default: from `ASYNC_TASK_DRIVER` env var or `redis`
+- `--queues QUEUES` – Comma-separated list of queue names to process in priority order (first queue has highest priority)
+  - Default: `default`
+- `--concurrency N` – Maximum number of concurrent tasks to process
+  - Default: `10`
+
+**Redis Options:**
+
+- `--redis-url URL` – Redis connection URL
+  - Default: from `ASYNC_TASK_REDIS_URL` env var or `redis://localhost:6379`
+- `--redis-password PASSWORD` – Redis password
+  - Default: from `ASYNC_TASK_REDIS_PASSWORD` env var
+- `--redis-db N` – Redis database number (0-15)
+  - Default: from `ASYNC_TASK_REDIS_DB` env var or `0`
+- `--redis-max-connections N` – Redis max connections in pool
+  - Default: from `ASYNC_TASK_REDIS_MAX_CONNECTIONS` env var or `10`
+
+**PostgreSQL Options:**
+
+- `--postgres-dsn DSN` – PostgreSQL connection DSN
+  - Default: from `ASYNC_TASK_POSTGRES_DSN` env var or `postgresql://test:test@localhost:5432/test_db`
+- `--postgres-queue-table TABLE` – PostgreSQL queue table name
+  - Default: from `ASYNC_TASK_POSTGRES_QUEUE_TABLE` env var or `task_queue`
+- `--postgres-dead-letter-table TABLE` – PostgreSQL dead letter table name
+  - Default: from `ASYNC_TASK_POSTGRES_DEAD_LETTER_TABLE` env var or `dead_letter_queue`
+
+**SQS Options:**
+
+- `--sqs-region REGION` – AWS SQS region
+  - Default: from `ASYNC_TASK_SQS_REGION` env var or `us-east-1`
+- `--sqs-queue-url-prefix PREFIX` – SQS queue URL prefix
+  - Default: from `ASYNC_TASK_SQS_QUEUE_PREFIX` env var
+- `--aws-access-key-id KEY` – AWS access key ID
+  - Default: from `AWS_ACCESS_KEY_ID` env var
+- `--aws-secret-access-key SECRET` – AWS secret access key
+  - Default: from `AWS_SECRET_ACCESS_KEY` env var
 
 **Examples:**
 
 ```bash
-# Basic usage
+# Basic usage with default settings
 python -m async_task worker
 
-# Multiple queues with priority
+# Multiple queues with priority order
 python -m async_task worker --queues high,default,low --concurrency 20
 
 # Redis with authentication
@@ -826,16 +1013,29 @@ python -m async_task worker \
     --redis-password secret \
     --redis-db 1
 
-# PostgreSQL
+# PostgreSQL with custom configuration
 python -m async_task worker \
     --driver postgres \
     --postgres-dsn postgresql://user:pass@localhost/dbname \
+    --postgres-queue-table my_queue \
+    --queues default,emails \
     --concurrency 15
+
+# SQS with custom region
+python -m async_task worker \
+    --driver sqs \
+    --sqs-region us-west-2 \
+    --sqs-queue-url-prefix https://sqs.us-west-2.amazonaws.com/123456789/ \
+    --queues default \
+    --concurrency 10
+
+# Memory driver (for development/testing)
+python -m async_task worker --driver memory --queues default --concurrency 5
 ```
 
 ### Migrate Command
 
-Initialize PostgreSQL database schema.
+Initialize database schema for PostgreSQL driver. This command creates the necessary tables and indexes in PostgreSQL for the task queue system. It only works with the PostgreSQL driver.
 
 ```bash
 python -m async_task migrate [OPTIONS]
@@ -843,17 +1043,89 @@ python -m async_task migrate [OPTIONS]
 
 **Options:**
 
-- `--driver` – Must be `postgres`
-- `--postgres-dsn` – PostgreSQL connection string
-- `--postgres-queue-table` – Queue table name
-- `--postgres-dead-letter-table` – Dead letter table name
+- `--driver DRIVER` – Queue driver (must be `postgres` for migrate command)
+  - Default: `postgres` (automatically set for migrate command)
+- `--postgres-dsn DSN` – PostgreSQL connection DSN
+  - Default: from `ASYNC_TASK_POSTGRES_DSN` env var or `postgresql://test:test@localhost:5432/test_db`
+- `--postgres-queue-table TABLE` – PostgreSQL queue table name
+  - Default: from `ASYNC_TASK_POSTGRES_QUEUE_TABLE` env var or `task_queue`
+- `--postgres-dead-letter-table TABLE` – PostgreSQL dead letter table name
+  - Default: from `ASYNC_TASK_POSTGRES_DEAD_LETTER_TABLE` env var or `dead_letter_queue`
 
-**Example:**
+**Examples:**
 
 ```bash
+# Basic migration with default settings (driver defaults to postgres)
+python -m async_task migrate
+
+# Migration with custom DSN
 python -m async_task migrate \
-    --driver postgres \
-    --postgres-dsn postgresql://user:pass@localhost/dbname
+    --postgres-dsn postgresql://user:pass@localhost:5432/mydb
+
+# Migration with custom table names
+python -m async_task migrate \
+    --postgres-dsn postgresql://user:pass@localhost:5432/mydb \
+    --postgres-queue-table my_task_queue \
+    --postgres-dead-letter-table my_dlq
+
+# Using environment variables
+export ASYNC_TASK_POSTGRES_DSN=postgresql://user:pass@localhost:5432/mydb
+python -m async_task migrate
+```
+
+**What it does:**
+
+The migrate command creates:
+
+- Queue table (`task_queue` by default) with columns for task storage
+- Lookup index (`idx_{queue_table}_lookup`) for efficient task retrieval
+- Dead letter table (`dead_letter_queue` by default) for failed tasks
+
+### Environment Variables
+
+All configuration options can be set via environment variables. CLI arguments take precedence over environment variables.
+
+**General:**
+
+- `ASYNC_TASK_DRIVER` – Queue driver (`memory`, `redis`, `postgres`, `sqs`)
+- `ASYNC_TASK_DEFAULT_QUEUE` – Default queue name
+
+**Redis:**
+
+- `ASYNC_TASK_REDIS_URL` – Redis connection URL
+- `ASYNC_TASK_REDIS_PASSWORD` – Redis password
+- `ASYNC_TASK_REDIS_DB` – Redis database number
+- `ASYNC_TASK_REDIS_MAX_CONNECTIONS` – Redis max connections
+
+**PostgreSQL:**
+
+- `ASYNC_TASK_POSTGRES_DSN` – PostgreSQL connection DSN
+- `ASYNC_TASK_POSTGRES_QUEUE_TABLE` – Queue table name
+- `ASYNC_TASK_POSTGRES_DEAD_LETTER_TABLE` – Dead letter table name
+
+**SQS:**
+
+- `ASYNC_TASK_SQS_REGION` – AWS region
+- `ASYNC_TASK_SQS_QUEUE_PREFIX` – SQS queue URL prefix
+- `AWS_ACCESS_KEY_ID` – AWS access key ID
+- `AWS_SECRET_ACCESS_KEY` – AWS secret access key
+
+### Exit Codes
+
+- `0` – Success
+- `1` – Error (command failed, migration error, etc.)
+
+### Getting Help
+
+For help on any command, use the `--help` flag:
+
+```bash
+# General help
+python -m async_task --help
+
+# Command-specific help
+python -m async_task worker --help
+python -m async_task migrate --help
 ```
 
 ---

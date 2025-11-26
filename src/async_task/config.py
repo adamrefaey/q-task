@@ -138,7 +138,144 @@ _global_config: Config | None = None
 
 
 def set_global_config(**overrides) -> None:
-    """Set global configuration for the async_task library"""
+    """Set global configuration for the async_task library.
+
+    This function sets the global configuration that will be used by all tasks
+    and workers. Configuration can be provided via keyword arguments, which
+    override environment variables and defaults.
+
+    Args:
+        **overrides: Configuration options to override. All options can also be
+            set via environment variables (see below for mappings).
+
+    General Options:
+        driver (str): Queue driver to use. Choices: "redis", "sqs", "memory", "postgres"
+            Env var: ASYNC_TASK_DRIVER
+            Default: "redis"
+
+        default_queue (str): Default queue name for tasks
+            Env var: ASYNC_TASK_DEFAULT_QUEUE
+            Default: "default"
+
+        default_max_retries (int): Default maximum retry attempts for tasks
+            Env var: ASYNC_TASK_MAX_RETRIES
+            Default: 3
+
+        default_retry_delay (int): Default retry delay in seconds
+            Env var: ASYNC_TASK_RETRY_DELAY
+            Default: 60
+
+        default_timeout (int | None): Default task timeout in seconds (None = no timeout)
+            Env var: ASYNC_TASK_TIMEOUT
+            Default: None
+
+    Redis Options:
+        redis_url (str): Redis connection URL
+            Env var: ASYNC_TASK_REDIS_URL
+            Default: "redis://localhost:6379"
+
+        redis_password (str | None): Redis password
+            Env var: ASYNC_TASK_REDIS_PASSWORD
+            Default: None
+
+        redis_db (int): Redis database number (0-15)
+            Env var: ASYNC_TASK_REDIS_DB
+            Default: 0
+
+        redis_max_connections (int): Maximum number of connections in Redis pool
+            Env var: ASYNC_TASK_REDIS_MAX_CONNECTIONS
+            Default: 10
+
+    PostgreSQL Options:
+        postgres_dsn (str): PostgreSQL connection DSN
+            Env var: ASYNC_TASK_POSTGRES_DSN
+            Default: "postgresql://test:test@localhost:5432/test_db"
+
+        postgres_queue_table (str): PostgreSQL queue table name
+            Env var: ASYNC_TASK_POSTGRES_QUEUE_TABLE
+            Default: "task_queue"
+
+        postgres_dead_letter_table (str): PostgreSQL dead letter table name
+            Env var: ASYNC_TASK_POSTGRES_DEAD_LETTER_TABLE
+            Default: "dead_letter_queue"
+
+        postgres_max_attempts (int): Maximum attempts before moving to dead letter queue
+            Env var: ASYNC_TASK_POSTGRES_MAX_ATTEMPTS
+            Default: 3
+
+        postgres_retry_delay_seconds (int): Retry delay in seconds for PostgreSQL driver
+            Env var: ASYNC_TASK_POSTGRES_RETRY_DELAY_SECONDS
+            Default: 60
+
+        postgres_visibility_timeout_seconds (int): Visibility timeout in seconds
+            Env var: ASYNC_TASK_POSTGRES_VISIBILITY_TIMEOUT_SECONDS
+            Default: 300
+
+        postgres_min_pool_size (int): Minimum connection pool size
+            Env var: ASYNC_TASK_POSTGRES_MIN_POOL_SIZE
+            Default: 10
+
+        postgres_max_pool_size (int): Maximum connection pool size
+            Env var: ASYNC_TASK_POSTGRES_MAX_POOL_SIZE
+            Default: 10
+
+    SQS Options:
+        sqs_region (str): AWS SQS region
+            Env var: ASYNC_TASK_SQS_REGION
+            Default: "us-east-1"
+
+        sqs_queue_url_prefix (str | None): SQS queue URL prefix
+            Env var: ASYNC_TASK_SQS_QUEUE_PREFIX
+            Default: None
+
+        aws_access_key_id (str | None): AWS access key ID
+            Env var: AWS_ACCESS_KEY_ID
+            Default: None (uses AWS credential chain)
+
+        aws_secret_access_key (str | None): AWS secret access key
+            Env var: AWS_SECRET_ACCESS_KEY
+            Default: None (uses AWS credential chain)
+
+    Examples:
+        # Basic configuration with Redis
+        set_global_config(
+            driver='redis',
+            redis_url='redis://localhost:6379',
+            default_queue='default'
+        )
+
+        # PostgreSQL with custom settings
+        set_global_config(
+            driver='postgres',
+            postgres_dsn='postgresql://user:pass@localhost:5432/mydb',
+            postgres_queue_table='my_queue',
+            postgres_max_attempts=5,
+            postgres_min_pool_size=5,
+            postgres_max_pool_size=20
+        )
+
+        # SQS configuration
+        set_global_config(
+            driver='sqs',
+            sqs_region='us-west-2',
+            sqs_queue_url_prefix='https://sqs.us-west-2.amazonaws.com/123456789/',
+            aws_access_key_id='your_key',
+            aws_secret_access_key='your_secret'
+        )
+
+        # Task defaults
+        set_global_config(
+            default_max_retries=5,
+            default_retry_delay=120,
+            default_timeout=300
+        )
+
+    Note:
+        Configuration precedence (highest to lowest):
+        1. Keyword arguments to set_global_config()
+        2. Environment variables
+        3. Default values
+    """
     global _global_config
     _global_config = Config.from_env(**overrides)
 
