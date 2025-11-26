@@ -4,7 +4,7 @@ Async Task provides a command-line interface for managing task queues and worker
 
 Commands:
     worker       Start a worker to process tasks from queues
-    migrate      Initialize database schema for PostgreSQL driver
+    migrate      Initialize database schema for PostgreSQL or MySQL driver
 
 Usage:
     python -m async_task <command> [OPTIONS]
@@ -30,7 +30,7 @@ Worker Command:
 
     Options:
         --driver DRIVER
-            Queue driver to use. Choices: redis, sqs, memory, postgres
+            Queue driver to use. Choices: redis, sqs, memory, postgres, mysql
             Default: from ASYNC_TASK_DRIVER env var or 'redis'
 
         --queues QUEUES
@@ -74,6 +74,21 @@ Worker Command:
                 Default: from ASYNC_TASK_POSTGRES_DEAD_LETTER_TABLE env var or
                 'dead_letter_queue'
 
+        MySQL Options:
+            --mysql-dsn DSN
+                MySQL connection DSN
+                Default: from ASYNC_TASK_MYSQL_DSN env var or
+                'mysql://test:test@localhost:3306/test_db'
+
+            --mysql-queue-table TABLE
+                MySQL queue table name
+                Default: from ASYNC_TASK_MYSQL_QUEUE_TABLE env var or 'task_queue'
+
+            --mysql-dead-letter-table TABLE
+                MySQL dead letter table name
+                Default: from ASYNC_TASK_MYSQL_DEAD_LETTER_TABLE env var or
+                'dead_letter_queue'
+
         SQS Options:
             --sqs-region REGION
                 AWS SQS region
@@ -113,6 +128,14 @@ Worker Command:
             --queues default,emails \\
             --concurrency 15
 
+        # MySQL with custom configuration
+        python -m async_task worker \\
+            --driver mysql \\
+            --mysql-dsn mysql://user:pass@localhost:3306/dbname \\
+            --mysql-queue-table my_queue \\
+            --queues default,emails \\
+            --concurrency 15
+
         # SQS with custom region
         python -m async_task worker \\
             --driver sqs \\
@@ -122,17 +145,17 @@ Worker Command:
             --concurrency 10
 
 Migrate Command:
-    Initialize database schema for PostgreSQL driver.
+    Initialize database schema for PostgreSQL or MySQL driver.
 
-    This command creates the necessary tables and indexes in PostgreSQL for the
-    task queue system. It only works with the PostgreSQL driver.
+    This command creates the necessary tables and indexes in PostgreSQL or MySQL
+    for the task queue system. It works with both PostgreSQL and MySQL drivers.
 
     Usage:
         python -m async_task migrate [OPTIONS]
 
     Options:
         --driver DRIVER
-            Queue driver (must be 'postgres' for migrate command)
+            Queue driver (must be 'postgres' or 'mysql' for migrate command)
             Default: 'postgres'
 
         --postgres-dsn DSN
@@ -149,6 +172,20 @@ Migrate Command:
             Default: from ASYNC_TASK_POSTGRES_DEAD_LETTER_TABLE env var or
             'dead_letter_queue'
 
+        --mysql-dsn DSN
+            MySQL connection DSN
+            Default: from ASYNC_TASK_MYSQL_DSN env var or
+            'mysql://test:test@localhost:3306/test_db'
+
+        --mysql-queue-table TABLE
+            MySQL queue table name
+            Default: from ASYNC_TASK_MYSQL_QUEUE_TABLE env var or 'task_queue'
+
+        --mysql-dead-letter-table TABLE
+            MySQL dead letter table name
+            Default: from ASYNC_TASK_MYSQL_DEAD_LETTER_TABLE env var or
+            'dead_letter_queue'
+
     Examples:
         # Basic migration with default settings
         python -m async_task migrate
@@ -163,12 +200,24 @@ Migrate Command:
             --postgres-queue-table my_task_queue \\
             --postgres-dead-letter-table my_dlq
 
+        # MySQL migration
+        python -m async_task migrate \\
+            --driver mysql \\
+            --mysql-dsn mysql://user:pass@localhost:3306/mydb
+
+        # MySQL migration with custom table names
+        python -m async_task migrate \\
+            --driver mysql \\
+            --mysql-dsn mysql://user:pass@localhost:3306/mydb \\
+            --mysql-queue-table my_task_queue \\
+            --mysql-dead-letter-table my_dlq
+
 Environment Variables:
     All configuration options can be set via environment variables. CLI arguments
     take precedence over environment variables.
 
     General:
-        ASYNC_TASK_DRIVER              Queue driver (memory, redis, postgres, sqs)
+        ASYNC_TASK_DRIVER              Queue driver (memory, redis, postgres, mysql, sqs)
         ASYNC_TASK_DEFAULT_QUEUE       Default queue name
 
     Redis:
@@ -181,6 +230,11 @@ Environment Variables:
         ASYNC_TASK_POSTGRES_DSN        PostgreSQL connection DSN
         ASYNC_TASK_POSTGRES_QUEUE_TABLE  Queue table name
         ASYNC_TASK_POSTGRES_DEAD_LETTER_TABLE  Dead letter table name
+
+    MySQL:
+        ASYNC_TASK_MYSQL_DSN           MySQL connection DSN
+        ASYNC_TASK_MYSQL_QUEUE_TABLE   Queue table name
+        ASYNC_TASK_MYSQL_DEAD_LETTER_TABLE  Dead letter table name
 
     SQS:
         ASYNC_TASK_SQS_REGION          AWS region

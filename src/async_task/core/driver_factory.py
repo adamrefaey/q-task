@@ -45,6 +45,14 @@ class DriverFactory:
             postgres_visibility_timeout_seconds=config.postgres_visibility_timeout_seconds,
             postgres_min_pool_size=config.postgres_min_pool_size,
             postgres_max_pool_size=config.postgres_max_pool_size,
+            mysql_dsn=config.mysql_dsn,
+            mysql_queue_table=config.mysql_queue_table,
+            mysql_dead_letter_table=config.mysql_dead_letter_table,
+            mysql_max_attempts=config.mysql_max_attempts,
+            mysql_retry_delay_seconds=config.mysql_retry_delay_seconds,
+            mysql_visibility_timeout_seconds=config.mysql_visibility_timeout_seconds,
+            mysql_min_pool_size=config.mysql_min_pool_size,
+            mysql_max_pool_size=config.mysql_max_pool_size,
         )
 
     @staticmethod
@@ -99,6 +107,19 @@ class DriverFactory:
                     ),
                     min_pool_size=kwargs.get("postgres_min_pool_size", 10),
                     max_pool_size=kwargs.get("postgres_max_pool_size", 10),
+                )
+            case "mysql":
+                from ..drivers.mysql_driver import MySQLDriver
+
+                return MySQLDriver(
+                    dsn=kwargs.get("mysql_dsn", "mysql://user:pass@localhost:3306/dbname"),
+                    queue_table=kwargs.get("mysql_queue_table", "task_queue"),
+                    dead_letter_table=kwargs.get("mysql_dead_letter_table", "dead_letter_queue"),
+                    max_attempts=kwargs.get("mysql_max_attempts", 3),
+                    retry_delay_seconds=kwargs.get("mysql_retry_delay_seconds", 60),
+                    visibility_timeout_seconds=kwargs.get("mysql_visibility_timeout_seconds", 300),
+                    min_pool_size=kwargs.get("mysql_min_pool_size", 10),
+                    max_pool_size=kwargs.get("mysql_max_pool_size", 10),
                 )
             case _:
                 raise ValueError(

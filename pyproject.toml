@@ -1,7 +1,7 @@
 [project]
 name = "async-task"
 version = "0.1.0"
-description = "A robust task queue system for Python with async-first design and multi-driver support (Memory/Postgres/Redis/AWS SQS) inspired by Laravel"
+description = "A robust task queue system for Python with async-first design and multi-driver support (Memory/Postgres/MySQL/Redis/AWS SQS) inspired by Laravel"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }

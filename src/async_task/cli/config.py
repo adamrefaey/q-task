@@ -32,6 +32,9 @@ def build_config_overrides(args: argparse.Namespace) -> dict[str, Any]:
         "postgres_dsn": "postgres_dsn",
         "postgres_queue_table": "postgres_queue_table",
         "postgres_dead_letter_table": "postgres_dead_letter_table",
+        "mysql_dsn": "mysql_dsn",
+        "mysql_queue_table": "mysql_queue_table",
+        "mysql_dead_letter_table": "mysql_dead_letter_table",
     }
 
     overrides: dict[str, Any] = {}

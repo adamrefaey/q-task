@@ -3,7 +3,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Literal, TypeAlias
 
-DriverType: TypeAlias = Literal["redis", "sqs", "memory", "postgres"]
+DriverType: TypeAlias = Literal["redis", "sqs", "memory", "postgres", "mysql"]
 
 
 # Environment variable mapping: field_name -> (env_var, default_value, type_converter)
@@ -41,6 +41,27 @@ ENV_VAR_MAPPING: dict[str, tuple[str, Any, Callable[[str], Any]]] = {
     ),
     "postgres_min_pool_size": ("ASYNC_TASK_POSTGRES_MIN_POOL_SIZE", "10", int),
     "postgres_max_pool_size": ("ASYNC_TASK_POSTGRES_MAX_POOL_SIZE", "10", int),
+    # MySQL configuration
+    "mysql_dsn": (
+        "ASYNC_TASK_MYSQL_DSN",
+        "mysql://test:test@localhost:3306/test_db",
+        str,
+    ),
+    "mysql_queue_table": ("ASYNC_TASK_MYSQL_QUEUE_TABLE", "task_queue", str),
+    "mysql_dead_letter_table": (
+        "ASYNC_TASK_MYSQL_DEAD_LETTER_TABLE",
+        "dead_letter_queue",
+        str,
+    ),
+    "mysql_max_attempts": ("ASYNC_TASK_MYSQL_MAX_ATTEMPTS", "3", int),
+    "mysql_retry_delay_seconds": ("ASYNC_TASK_MYSQL_RETRY_DELAY_SECONDS", "60", int),
+    "mysql_visibility_timeout_seconds": (
+        "ASYNC_TASK_MYSQL_VISIBILITY_TIMEOUT_SECONDS",
+        "300",
+        int,
+    ),
+    "mysql_min_pool_size": ("ASYNC_TASK_MYSQL_MIN_POOL_SIZE", "10", int),
+    "mysql_max_pool_size": ("ASYNC_TASK_MYSQL_MAX_POOL_SIZE", "10", int),
     # Task defaults
     "default_queue": ("ASYNC_TASK_DEFAULT_QUEUE", "default", str),
     "default_max_retries": ("ASYNC_TASK_MAX_RETRIES", "3", int),
@@ -77,6 +98,16 @@ class Config:
     postgres_visibility_timeout_seconds: int = 300
     postgres_min_pool_size: int = 10
     postgres_max_pool_size: int = 10
+
+    # MySQL configuration
+    mysql_dsn: str = "mysql://test:test@localhost:3306/test_db"
+    mysql_queue_table: str = "task_queue"
+    mysql_dead_letter_table: str = "dead_letter_queue"
+    mysql_max_attempts: int = 3
+    mysql_retry_delay_seconds: int = 60
+    mysql_visibility_timeout_seconds: int = 300
+    mysql_min_pool_size: int = 10
+    mysql_max_pool_size: int = 10
 
     # Task defaults
     default_queue: str = "default"
@@ -132,6 +163,18 @@ class Config:
             raise ValueError("postgres_max_pool_size must be positive")
         if config["postgres_min_pool_size"] > config["postgres_max_pool_size"]:
             raise ValueError("postgres_min_pool_size cannot be greater than postgres_max_pool_size")
+        if config.get("mysql_max_attempts", 3) < 1:
+            raise ValueError("mysql_max_attempts must be positive")
+        if config.get("mysql_retry_delay_seconds", 60) < 0:
+            raise ValueError("mysql_retry_delay_seconds must be non-negative")
+        if config.get("mysql_visibility_timeout_seconds", 300) < 1:
+            raise ValueError("mysql_visibility_timeout_seconds must be positive")
+        if config.get("mysql_min_pool_size", 10) < 1:
+            raise ValueError("mysql_min_pool_size must be positive")
+        if config.get("mysql_max_pool_size", 10) < 1:
+            raise ValueError("mysql_max_pool_size must be positive")
+        if config.get("mysql_min_pool_size", 10) > config.get("mysql_max_pool_size", 10):
+            raise ValueError("mysql_min_pool_size cannot be greater than mysql_max_pool_size")
 
 
 _global_config: Config | None = None
@@ -149,7 +192,7 @@ def set_global_config(**overrides) -> None:
             set via environment variables (see below for mappings).
 
     General Options:
-        driver (str): Queue driver to use. Choices: "redis", "sqs", "memory", "postgres"
+        driver (str): Queue driver to use. Choices: "redis", "sqs", "memory", "postgres", "mysql"
             Env var: ASYNC_TASK_DRIVER
             Default: "redis"
 
@@ -219,6 +262,39 @@ def set_global_config(**overrides) -> None:
             Env var: ASYNC_TASK_POSTGRES_MAX_POOL_SIZE
             Default: 10
 
+    MySQL Options:
+        mysql_dsn (str): MySQL connection DSN
+            Env var: ASYNC_TASK_MYSQL_DSN
+            Default: "mysql://test:test@localhost:3306/test_db"
+
+        mysql_queue_table (str): MySQL queue table name
+            Env var: ASYNC_TASK_MYSQL_QUEUE_TABLE
+            Default: "task_queue"
+
+        mysql_dead_letter_table (str): MySQL dead letter table name
+            Env var: ASYNC_TASK_MYSQL_DEAD_LETTER_TABLE
+            Default: "dead_letter_queue"
+
+        mysql_max_attempts (int): Maximum attempts before moving to dead letter queue
+            Env var: ASYNC_TASK_MYSQL_MAX_ATTEMPTS
+            Default: 3
+
+        mysql_retry_delay_seconds (int): Retry delay in seconds for MySQL driver
+            Env var: ASYNC_TASK_MYSQL_RETRY_DELAY_SECONDS
+            Default: 60
+
+        mysql_visibility_timeout_seconds (int): Visibility timeout in seconds
+            Env var: ASYNC_TASK_MYSQL_VISIBILITY_TIMEOUT_SECONDS
+            Default: 300
+
+        mysql_min_pool_size (int): Minimum connection pool size
+            Env var: ASYNC_TASK_MYSQL_MIN_POOL_SIZE
+            Default: 10
+
+        mysql_max_pool_size (int): Maximum connection pool size
+            Env var: ASYNC_TASK_MYSQL_MAX_POOL_SIZE
+            Default: 10
+
     SQS Options:
         sqs_region (str): AWS SQS region
             Env var: ASYNC_TASK_SQS_REGION
@@ -252,6 +328,16 @@ def set_global_config(**overrides) -> None:
             postgres_max_attempts=5,
             postgres_min_pool_size=5,
             postgres_max_pool_size=20
+        )
+
+        # MySQL with custom settings
+        set_global_config(
+            driver='mysql',
+            mysql_dsn='mysql://user:pass@localhost:3306/mydb',
+            mysql_queue_table='my_queue',
+            mysql_max_attempts=5,
+            mysql_min_pool_size=5,
+            mysql_max_pool_size=20
         )
 
         # SQS configuration

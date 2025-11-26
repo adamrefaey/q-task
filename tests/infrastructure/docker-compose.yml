@@ -45,3 +45,22 @@ services:
       timeout: 3s
       retries: 5
       start_period: 10s
+
+  mysql:
+    image: mysql:8.0
+    container_name: mysql-test
+    ports:
+      - "127.0.0.1:3306:3306"
+    environment:
+      - MYSQL_ROOT_PASSWORD=test
+      - MYSQL_USER=test
+      - MYSQL_PASSWORD=test
+      - MYSQL_DATABASE=test_db
+    command: --default-authentication-plugin=mysql_native_password
+    healthcheck:
+      test:
+        ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "test", "-ptest"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s

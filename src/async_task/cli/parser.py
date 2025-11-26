@@ -16,7 +16,7 @@ def add_driver_args(parser: argparse.ArgumentParser, default_driver: str | None 
     parser.add_argument(
         "--driver",
         type=str,
-        choices=["redis", "sqs", "memory", "postgres"],
+        choices=["redis", "sqs", "memory", "postgres", "mysql"],
         default=default_driver,
         help="Queue driver to use (default: from ASYNC_TASK_DRIVER env var or 'redis')",
     )
@@ -85,6 +85,24 @@ def add_driver_args(parser: argparse.ArgumentParser, default_driver: str | None 
         help="PostgreSQL dead letter table name (default: from ASYNC_TASK_POSTGRES_DEAD_LETTER_TABLE env var or 'dead_letter_queue')",
     )
 
+    # MySQL options
+    mysql_group = parser.add_argument_group("MySQL options")
+    mysql_group.add_argument(
+        "--mysql-dsn",
+        type=str,
+        help="MySQL connection DSN (default: from ASYNC_TASK_MYSQL_DSN env var)",
+    )
+    mysql_group.add_argument(
+        "--mysql-queue-table",
+        type=str,
+        help="MySQL queue table name (default: from ASYNC_TASK_MYSQL_QUEUE_TABLE env var or 'task_queue')",
+    )
+    mysql_group.add_argument(
+        "--mysql-dead-letter-table",
+        type=str,
+        help="MySQL dead letter table name (default: from ASYNC_TASK_MYSQL_DEAD_LETTER_TABLE env var or 'dead_letter_queue')",
+    )
+
 
 def create_parser() -> argparse.ArgumentParser:
     """Create and configure the argument parser.
@@ -125,8 +143,8 @@ def create_parser() -> argparse.ArgumentParser:
     # Migrate subcommand
     migrate_parser = subparsers.add_parser(
         "migrate",
-        description="Initialize database schema for PostgreSQL driver",
-        help="Initialize PostgreSQL database schema",
+        description="Initialize database schema for PostgreSQL or MySQL driver",
+        help="Initialize database schema",
     )
     add_driver_args(migrate_parser, default_driver="postgres")
 
