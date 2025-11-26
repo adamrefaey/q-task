@@ -676,7 +676,7 @@ driver = PostgresDriver(
 - Visibility timeout for crash recovery
 - Connection pooling with asyncpg
 - ACID guarantees
-- Requires PostgreSQL 12+
+- Requires PostgreSQL 14+ (for `SKIP LOCKED` support and Django ORM integration)
 
 **Setup:**
 
@@ -1005,7 +1005,7 @@ kill -TERM <worker_pid>
 | -------------- | --------------------------- | ---------------------------------------- | ------------------------------ |
 | **Memory**     | Development, testing        | No setup, fast                           | Data lost on restart           |
 | **Redis**      | Production, high-throughput | Fast, reliable, distributed              | Requires Redis server          |
-| **PostgreSQL** | Enterprise, existing DB     | ACID guarantees, DLQ, visibility timeout | Requires PostgreSQL 12+        |
+| **PostgreSQL** | Enterprise, existing DB     | ACID guarantees, DLQ, visibility timeout | Requires PostgreSQL 14+        |
 | **MySQL**      | Enterprise, existing DB     | ACID guarantees, DLQ, visibility timeout | Requires MySQL 8.0+            |
 | **SQS**        | AWS, serverless             | Managed, auto-scaling, zero ops          | AWS-specific, cost per message |
 
@@ -1549,7 +1549,7 @@ just docker-down
 - **PostgreSQL Driver**:
 
   - `asyncpg` ≥0.30.0
-  - PostgreSQL server 12+ (for `SKIP LOCKED` support)
+  - PostgreSQL server 14+ (for `SKIP LOCKED` support and Django ORM integration)
 
 - **MySQL Driver**:
 

@@ -28,7 +28,7 @@ class PostgresDriver(BaseDriver):
         - Auto-recovery of stuck tasks via poll loop
 
     Requirements:
-        - PostgreSQL 12+ (SKIP LOCKED support)
+        - PostgreSQL 14+ (for SKIP LOCKED support and Django ORM integration)
         - asyncpg library
     """
 
