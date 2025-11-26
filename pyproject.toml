@@ -29,7 +29,7 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 
-dependencies = ["pydantic>=2.12.4", "msgpack>=1.1.0"]
+dependencies = ["msgpack>=1.1.0"]
 
 [project.optional-dependencies]
 redis = ["redis[hiredis]>=7.1.0"]
