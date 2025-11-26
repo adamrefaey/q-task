@@ -5,17 +5,19 @@ import argparse
 from .utils import DEFAULT_CONCURRENCY, DEFAULT_QUEUE
 
 
-def add_driver_args(parser: argparse.ArgumentParser) -> None:
+def add_driver_args(parser: argparse.ArgumentParser, default_driver: str | None = None) -> None:
     """Add common driver configuration arguments to a parser.
 
     Args:
         parser: Argument parser to add driver arguments to
+        default_driver: Optional default driver value to use if not specified
     """
     # Driver selection
     parser.add_argument(
         "--driver",
         type=str,
         choices=["redis", "sqs", "memory", "postgres"],
+        default=default_driver,
         help="Queue driver to use (default: from ASYNC_TASK_DRIVER env var or 'redis')",
     )
 
@@ -126,6 +128,6 @@ def create_parser() -> argparse.ArgumentParser:
         description="Initialize database schema for PostgreSQL driver",
         help="Initialize PostgreSQL database schema",
     )
-    add_driver_args(migrate_parser)
+    add_driver_args(migrate_parser, default_driver="postgres")
 
     return parser

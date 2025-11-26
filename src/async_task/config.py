@@ -21,7 +21,11 @@ ENV_VAR_MAPPING: dict[str, tuple[str, Any, Callable[[str], Any]]] = {
     "aws_access_key_id": ("AWS_ACCESS_KEY_ID", None, str),
     "aws_secret_access_key": ("AWS_SECRET_ACCESS_KEY", None, str),
     # PostgreSQL configuration
-    "postgres_dsn": ("ASYNC_TASK_POSTGRES_DSN", "postgresql://user:pass@localhost/dbname", str),
+    "postgres_dsn": (
+        "ASYNC_TASK_POSTGRES_DSN",
+        "postgresql://test:test@localhost:5432/test_db",
+        str,
+    ),
     "postgres_queue_table": ("ASYNC_TASK_POSTGRES_QUEUE_TABLE", "task_queue", str),
     "postgres_dead_letter_table": (
         "ASYNC_TASK_POSTGRES_DEAD_LETTER_TABLE",
@@ -65,7 +69,7 @@ class Config:
     aws_secret_access_key: str | None = None
 
     # PostgreSQL configuration
-    postgres_dsn: str = "postgresql://user:pass@localhost/dbname"
+    postgres_dsn: str = "postgresql://test:test@localhost:5432/test_db"
     postgres_queue_table: str = "task_queue"
     postgres_dead_letter_table: str = "dead_letter_queue"
     postgres_max_attempts: int = 3
