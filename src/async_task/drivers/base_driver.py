@@ -1,9 +1,7 @@
-from abc import abstractmethod
-from typing import Protocol, runtime_checkable
+from abc import ABC, abstractmethod
 
 
-@runtime_checkable
-class BaseDriver(Protocol):
+class BaseDriver(ABC):
     """Protocol that all queue drivers must implement.
 
     Defines the contract for queue operations that enable task enqueueing,
