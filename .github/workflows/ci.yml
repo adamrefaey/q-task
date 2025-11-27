@@ -280,7 +280,7 @@ jobs:
           set -euo pipefail
           wait_port() {
             host=$1; port=$2
-            for i in {1..60}; do
+            for i in {1..120}; do
               if (echo > /dev/tcp/${host}/${port}) >/dev/null 2>&1; then
                 return 0
               fi
@@ -289,27 +289,49 @@ jobs:
             return 1
           }
 
-            echo "Waiting for postgres:5432..."
-            wait_port postgres 5432 || { echo "postgres not ready"; exit 1; }
+            echo "Waiting for postgres (localhost:5432)..."
+            if ! wait_port 127.0.0.1 5432; then
+              echo "postgres not ready - gathering diagnostics"
+              echo "--- Docker containers ---"
+              docker ps -a --format 'table {{.ID}}	{{.Names}}	{{.Image}}	{{.Status}}'
+              echo "--- Listening ports ---"
+              ss -ltnp || netstat -ltnp || true
+              echo "--- Postgres logs (matching image name 'postgres') ---"
+              for cid in $(docker ps -a --filter ancestor=postgres --format '{{.Names}}'); do
+                echo "Logs for $cid:"; docker logs --tail 200 "$cid" || true
+              done
+              exit 1
+            fi
 
-            echo "Waiting for redis:6379..."
-            wait_port redis 6379 || { echo "redis not ready"; exit 1; }
+            echo "Waiting for redis (localhost:6379)..."
+            wait_port 127.0.0.1 6379 || { echo "redis not ready"; exit 1; }
 
-            echo "Waiting for mysql:3306..."
-            wait_port mysql 3306 || { echo "mysql not ready"; exit 1; }
+            echo "Waiting for mysql (localhost:3306)..."
+            if ! wait_port 127.0.0.1 3306; then
+              echo "mysql not ready - gathering diagnostics"
+              echo "--- Docker containers ---"
+              docker ps -a --format 'table {{.ID}}	{{.Names}}	{{.Image}}	{{.Status}}'
+              echo "--- Listening ports ---"
+              ss -ltnp || netstat -ltnp || true
+              echo "--- MySQL logs (matching image name 'mysql') ---"
+              for cid in $(docker ps -a --filter ancestor=mysql --format '{{.Names}}'); do
+                echo "Logs for $cid:"; docker logs --tail 200 "$cid" || true
+              done
+              exit 1
+            fi
 
-            echo "Waiting for rabbitmq:5672..."
-            wait_port rabbitmq 5672 || { echo "rabbitmq not ready"; exit 1; }
+            echo "Waiting for rabbitmq (localhost:5672)..."
+            wait_port 127.0.0.1 5672 || { echo "rabbitmq not ready"; exit 1; }
 
-            echo "Waiting for localstack:4566..."
-            wait_port localstack 4566 || { echo "localstack not ready"; exit 1; }
+            echo "Waiting for localstack (localhost:4566)..."
+            wait_port 127.0.0.1 4566 || { echo "localstack not ready"; exit 1; }
 
       - name: Create LocalStack SQS queue
         run: |
           set -euo pipefail
           python -m pip install --upgrade pip
           python -m pip install "boto3==1.40.61" "botocore==1.40.61" "s3transfer==0.14.0"
-          LOCALSTACK_ENDPOINT=http://localstack:4566 LOCALSTACK_QUEUE_NAME=test-queue python .github/scripts/create_sqs_queue.py
+          LOCALSTACK_ENDPOINT=http://127.0.0.1:4566 LOCALSTACK_QUEUE_NAME=test-queue python .github/scripts/create_sqs_queue.py
 
       - name: Initialize Postgres and MySQL schemas
         run: |
@@ -321,21 +343,21 @@ jobs:
           export PGPASSWORD=test
           for f in tests/infrastructure/postgres-init/*.sql; do
             echo "Applying $f to Postgres"
-            psql -h postgres -U test -d test_db -f "$f" || true
+            psql -h 127.0.0.1 -U test -d test_db -f "$f"
           done
 
           echo "Initializing MySQL schemas..."
           for f in tests/infrastructure/mysql-init/*.sql; do
             echo "Applying $f to MySQL"
-            mysql -h mysql -u test -ptest test_db < "$f" || true
+            mysql -h 127.0.0.1 -u test -ptest test_db < "$f"
           done
 
       - name: Run integration tests (activate .venv)
         env:
-          ASYNC_TASK_REDIS_URL: redis://redis:6379
-          ASYNC_TASK_POSTGRES_URL: postgresql://test:test@postgres:5432/test_db
-          ASYNC_TASK_MYSQL_URL: mysql://test:test@mysql:3306/test_db
-          ASYNC_TASK_RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+          ASYNC_TASK_REDIS_URL: redis://127.0.0.1:6379
+          ASYNC_TASK_POSTGRES_URL: postgresql://test:test@127.0.0.1:5432/test_db
+          ASYNC_TASK_MYSQL_URL: mysql://test:test@127.0.0.1:3306/test_db
+          ASYNC_TASK_RABBITMQ_URL: amqp://guest:guest@127.0.0.1:5672/
         run: |
           set -euo pipefail
           if [ -f .venv/bin/activate ]; then
