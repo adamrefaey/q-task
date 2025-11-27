@@ -1,5 +1,6 @@
 # Async Task
 
+[![Coverage](.github/coverage.svg)](.github/coverage.svg)
 [![Python Version](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -190,6 +191,25 @@ python -m async_task worker
 **That's it!** Your first async task queue is ready. Now let's explore the powerful features.
 
 ---
+
+## Quick Reference
+
+- **One-line setup:** `just init` — install deps and pre-commit hooks
+- **Start services:** `just services-up` — Redis, Postgres, MySQL, RabbitMQ for local integration tests
+- **Run tests:** `just test` (or `pytest`) — use `just test-unit` / `just test-integration` to scope
+- **Run with coverage:** `just test-cov` or `pytest --cov=src/async_task --cov-report=html`
+- **Run the worker locally:** `python -m async_task worker`
+- **Pre-commit hooks:** `./setup-pre-commit.sh` or `just setup-hooks`
+- **Format / lint / typecheck:** `just format`, `just lint`, `just typecheck`
+
+## CI & Contributing (short)
+
+- **CI runs on PRs and pushes to `main`** and includes lint, type checks and tests across Python 3.11–3.13.
+- **Pre-commit hooks** enforce formatting and static checks locally before commits (see `./setup-pre-commit.sh`).
+- **Branch protection:** enable required status checks (CI success, lint, unit/integration jobs) for `main`.
+- **Coverage badge:** the repository updates `.github/coverage.svg` automatically via `.github/workflows/coverage-badge.yml`.
+- **Run full CI locally:** `just ci` (runs format/lint/typecheck/tests like the workflow).
+
 
 ## Comparison with Alternatives
 
