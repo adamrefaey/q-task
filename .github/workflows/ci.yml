@@ -306,8 +306,8 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install --upgrade pip
-          python -m pip install awscli
-          AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test aws --endpoint-url=http://127.0.0.1:4566 sqs create-queue --queue-name test-queue
+          python -m pip install "boto3==1.40.61" "botocore==1.40.61" "s3transfer==0.14.0"
+          python .github/scripts/create_sqs_queue.py
 
       - name: Run integration tests (activate .venv)
         env:
