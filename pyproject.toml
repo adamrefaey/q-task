@@ -144,4 +144,6 @@ exclude_lines = [
     "raise NotImplementedError",
     "if __name__ == .__main__.:",
     "if TYPE_CHECKING:",
+    "\\.\\.\\.",                  # Exclude ellipsis in abstract methods
+    "@abstractmethod",
 ]
