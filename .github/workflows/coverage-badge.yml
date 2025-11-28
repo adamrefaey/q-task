@@ -14,7 +14,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          persist-credentials: true
+          # Do not persist the default GITHUB_TOKEN credentials so we can
+          # configure git to push using a personal access token (PAT).
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -94,13 +96,54 @@ jobs:
 
       - name: Commit coverage badge
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        env:
+          # Provide your personal access token in repository secrets as
+          # PERSONAL_ACCESS_TOKEN. Also optionally set GIT_USER_NAME and
+          # GIT_USER_EMAIL to control commit author. Falls back to
+          # github.actor and the noreply email if not provided.
+          PERSONAL_ACCESS_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+          GIT_USER_NAME: ${{ secrets.GIT_USER_NAME || github.actor }}
+          GIT_USER_EMAIL: ${{ secrets.GIT_USER_EMAIL || format('%s@users.noreply.github.com', github.actor) }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          set -euo pipefail
+          if [ -z "${PERSONAL_ACCESS_TOKEN:-}" ]; then
+            echo "PERSONAL_ACCESS_TOKEN is not set. Skipping push to remote to avoid protected branch rejection."
+            exit 0
+          fi
+          git config user.name "$GIT_USER_NAME"
+          git config user.email "$GIT_USER_EMAIL"
+          # Update the remote URL to include the PAT for pushing. This keeps
+          # the commit author as the provided user while authenticating with
+          # the PAT. Using HTTPS URL with token avoids relying on
+          # persist-credentials.
+          remote_url=$(git remote get-url origin)
+          # If remote_url is an HTTPS URL, inject token. For SSH or other
+          # formats, fall back to `git push` which will likely fail without
+          # proper auth.
+          if [[ "$remote_url" == https://* ]]; then
+            auth_remote=$(echo "$remote_url" | sed -E "s#https://#https://${PERSONAL_ACCESS_TOKEN}@#")
+            git remote set-url origin "$auth_remote"
+          fi
           git add .github/coverage.svg || true
           if ! git diff --staged --quiet; then
-            git commit -m "chore: update coverage badge" || true
-            git push
+            # If a GPG private key is provided in secrets, import it and
+            # configure git to sign commits. Accept optional passphrase via
+            # GPG_PASSPHRASE secret.
+            if [ -n "${GPG_PRIVATE_KEY:-}" ]; then
+              echo "$GPG_PRIVATE_KEY" | gpg --batch --import || true
+              keyid=$(gpg --list-secret-keys --with-colons | awk -F: '/^sec/ {print $5; exit}') || true
+              if [ -n "$keyid" ]; then
+                git config user.signingkey "$keyid" || true
+                git config commit.gpgsign true || true
+                export GIT_COMMITTER_SIGNINGKEY="$keyid"
+              fi
+            fi
+            if [ -n "${GPG_PRIVATE_KEY:-}" ]; then
+              git commit -S -m "chore: update coverage badge" || true
+            else
+              git commit -m "chore: update coverage badge" || true
+            fi
+            git push origin HEAD:main || true
           else
             echo "No changes to coverage badge"
           fi

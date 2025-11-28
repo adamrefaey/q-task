@@ -18,7 +18,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          persist-credentials: true
+          persist-credentials: false
 
       # The `ci-status` step below handles both `workflow_run` and
       # push/PR events. It replaces the previous shell-based
@@ -96,13 +96,40 @@ jobs:
 
       - name: Commit test badge
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        env:
+          PERSONAL_ACCESS_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+          GIT_USER_NAME: ${{ secrets.GIT_USER_NAME || github.actor }}
+          GIT_USER_EMAIL: ${{ secrets.GIT_USER_EMAIL || format('%s@users.noreply.github.com', github.actor) }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          set -euo pipefail
+          if [ -z "${PERSONAL_ACCESS_TOKEN:-}" ]; then
+            echo "PERSONAL_ACCESS_TOKEN is not set. Skipping push to remote to avoid protected branch rejection."
+            exit 0
+          fi
+          git config user.name "$GIT_USER_NAME"
+          git config user.email "$GIT_USER_EMAIL"
+          remote_url=$(git remote get-url origin)
+          if [[ "$remote_url" == https://* ]]; then
+            auth_remote=$(echo "$remote_url" | sed -E "s#https://#https://${PERSONAL_ACCESS_TOKEN}@#")
+            git remote set-url origin "$auth_remote"
+          fi
           git add .github/tests.svg || true
           if ! git diff --staged --quiet; then
-            git commit -m "chore: update test status badge" || true
-            git push
+            if [ -n "${GPG_PRIVATE_KEY:-}" ]; then
+              echo "$GPG_PRIVATE_KEY" | gpg --batch --import || true
+              keyid=$(gpg --list-secret-keys --with-colons | awk -F: '/^sec/ {print $5; exit}') || true
+              if [ -n "$keyid" ]; then
+                git config user.signingkey "$keyid" || true
+                git config commit.gpgsign true || true
+                export GIT_COMMITTER_SIGNINGKEY="$keyid"
+              fi
+            fi
+            if [ -n "${GPG_PRIVATE_KEY:-}" ]; then
+              git commit -S -m "chore: update test status badge" || true
+            else
+              git commit -m "chore: update test status badge" || true
+            fi
+            git push origin HEAD:main || true
           else
             echo "No changes to test badge"
           fi
