@@ -1,0 +1,108 @@
+name: Update test status badge
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types:
+      - completed
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test-badge:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: true
+
+      # The `ci-status` step below handles both `workflow_run` and
+      # push/PR events. It replaces the previous shell-based
+      # `Determine test status` step to simplify output handling.
+
+      - name: Check CI workflow status (for push/PR)
+        id: ci-status
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // Always define outputs to avoid linter warnings and ensure
+            // downstream steps can safely reference them.
+            core.setOutput('status', '');
+            core.setOutput('color', '');
+
+            // Handle workflow_run events directly (use payload conclusion)
+            if (context.eventName === 'workflow_run') {
+              const conclusion = context.payload.workflow_run && context.payload.workflow_run.conclusion;
+              if (conclusion === 'success') {
+                core.setOutput('status', 'passing');
+                core.setOutput('color', 'brightgreen');
+              } else if (conclusion === 'failure' || conclusion === 'cancelled') {
+                core.setOutput('status', 'failing');
+                core.setOutput('color', 'red');
+              } else {
+                core.setOutput('status', 'running');
+                core.setOutput('color', 'yellow');
+              }
+              return;
+            }
+
+            // For push/PR events, inspect the latest CI run via API
+            const { data: runs } = await github.rest.actions.listWorkflowRuns({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'ci.yml',
+              per_page: 1
+            });
+
+            if (runs.workflow_runs.length > 0) {
+              const conclusion = runs.workflow_runs[0].conclusion;
+              if (conclusion === 'success') {
+                core.setOutput('status', 'passing');
+                core.setOutput('color', 'brightgreen');
+              } else if (conclusion === 'failure' || conclusion === 'cancelled') {
+                core.setOutput('status', 'failing');
+                core.setOutput('color', 'red');
+              } else {
+                core.setOutput('status', 'running');
+                core.setOutput('color', 'yellow');
+              }
+            } else {
+              core.setOutput('status', 'unknown');
+              core.setOutput('color', 'lightgrey');
+            }
+
+      - name: Set badge values
+        id: badge-values
+        run: |
+          # Read status/color from the single `ci-status` step which
+          # handles both `workflow_run` and push/PR events.
+          STATUS="${{ steps.ci-status.outputs.status || 'unknown' }}"
+          COLOR="${{ steps.ci-status.outputs.color || 'lightgrey' }}"
+          echo "status=$STATUS" >> $GITHUB_OUTPUT
+          echo "color=$COLOR" >> $GITHUB_OUTPUT
+
+      - name: Generate test status badge
+        uses: emibcn/badge-action@v2.0.2
+        with:
+          label: "Tests"
+          status: ${{ steps.badge-values.outputs.status }}
+          color: ${{ steps.badge-values.outputs.color }}
+          icon: "pytest"
+          path: ".github/tests.svg"
+
+      - name: Commit test badge
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/tests.svg || true
+          if ! git diff --staged --quiet; then
+            git commit -m "chore: update test status badge" || true
+            git push
+          else
+            echo "No changes to test badge"
+          fi

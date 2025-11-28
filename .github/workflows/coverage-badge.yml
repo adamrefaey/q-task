@@ -42,10 +42,55 @@ jobs:
           python -m pip install --upgrade pip
           uv sync --all-extras --group dev
 
-      - name: Run tests and generate coverage badge
+      - name: Run tests and generate coverage report
         run: |
-          # run tests (if needed) and generate coverage badge
-          uv run coverage-badge -o .github/coverage.svg || true
+          set -euo pipefail
+          uv run pytest --cov=src/async_task --cov-report=term --cov-report=xml || true
+
+      - name: Extract coverage percentage
+        id: coverage
+        run: |
+          set -euo pipefail
+          # Ensure an output exists even if parsing fails
+          echo "percentage=" >> $GITHUB_OUTPUT
+          if [ -f coverage.xml ]; then
+            COVERAGE=$(uv run python -c "import xml.etree.ElementTree as ET; tree = ET.parse('coverage.xml'); root = tree.getroot(); print(f\"{float(root.attrib['line-rate']) * 100:.1f}%\")" 2>/dev/null || echo "unknown")
+          else
+            COVERAGE="unknown"
+          fi
+          echo "percentage=$COVERAGE" >> $GITHUB_OUTPUT
+          echo "Coverage: $COVERAGE"
+
+      - name: Determine coverage color
+        id: coverage-color
+        run: |
+          set -euo pipefail
+          # Ensure an output exists for color even if logic fails
+          echo "color=" >> $GITHUB_OUTPUT
+          PERCENTAGE="${{ steps.coverage.outputs.percentage }}"
+          if [[ "$PERCENTAGE" == *"%"* ]]; then
+            NUM=$(echo "$PERCENTAGE" | sed 's/%//' | cut -d. -f1)
+            if [ "$NUM" -ge 90 ]; then
+              echo "color=green" >> $GITHUB_OUTPUT
+            elif [ "$NUM" -ge 75 ]; then
+              echo "color=yellow" >> $GITHUB_OUTPUT
+            elif [ "$NUM" -ge 50 ]; then
+              echo "color=orange" >> $GITHUB_OUTPUT
+            else
+              echo "color=red" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "color=lightgrey" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Generate coverage badge with icon
+        uses: emibcn/badge-action@v2.0.2
+        with:
+          label: "Coverage"
+          status: ${{ steps.coverage.outputs.percentage }}
+          color: ${{ steps.coverage-color.outputs.color }}
+          icon: "codecov"
+          path: ".github/coverage.svg"
 
       - name: Commit coverage badge
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'

@@ -1,0 +1,41 @@
+name: Update Python version badge
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  python-version-badge:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: true
+
+      - name: Generate Python version badge
+        uses: emibcn/badge-action@v2.0.2
+        with:
+          label: "Python"
+          status: "3.11 | 3.12 | 3.13 | 3.14"
+          color: "3776ab"
+          icon: "python"
+          path: ".github/python-version.svg"
+
+      - name: Commit Python version badge
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/python-version.svg || true
+          if ! git diff --staged --quiet; then
+            git commit -m "chore: update Python version badge" || true
+            git push
+          else
+            echo "No changes to Python version badge"
+          fi

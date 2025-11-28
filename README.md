@@ -1,7 +1,8 @@
 # Async Task
 
+[![Tests](.github/tests.svg)](https://github.com/adamrefaey/async-task/actions/workflows/ci.yml)
 [![Coverage](.github/coverage.svg)](.github/coverage.svg)
-[![Python Version](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![Python Version](.github/python-version.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 A modern, async-first, type-safe task queue Python package inspired by Laravel. Native FastAPI integration. Switch between multiple queue backends (Redis, PostgreSQL, MySQL, RabbitMQ, AWS SQS) with one config line. Automatic ORM serialization (SQLAlchemy, Django, Tortoise) using msgpack reduces payloads by 90%+. Features ACID guarantees, dead-letter queues, crash recovery.
@@ -10,28 +11,35 @@ A modern, async-first, type-safe task queue Python package inspired by Laravel. 
 
 ## Table of Contents
 
-- [Why Async Task?](#why-async-task)
-- [Key Features](#key-features)
-- [Quick Start](#quick-start)
-- [Comparison with Alternatives](#comparison-with-alternatives)
-- [Documentation](#documentation)
-  - [Installation](docs/installation.md)
-  - [Queue Drivers](docs/queue-drivers.md)
-  - [ORM Integrations](docs/orm-integrations.md)
-  - [Framework Integrations](docs/framework-integrations.md)
-  - [Task Definitions](docs/task-definitions.md)
-  - [Running Workers](docs/running-workers.md)
-  - [Configuration](docs/configuration.md)
-  - [CLI Reference](docs/cli-reference.md)
-  - [Best Practices](docs/best-practices.md)
-- [Examples](#examples)
-  - [Function-Based Tasks Examples](docs/examples/function-based-tasks.md)
-  - [Class-Based Tasks Examples](docs/examples/class-based-tasks.md)
-- [Contributing](#contributing)
-- [License](#license)
-- [Support](#support)
-- [Roadmap](#roadmap)
-- [Credits](#credits)
+- [Async Task](#async-task)
+  - [Table of Contents](#table-of-contents)
+  - [Why Async Task?](#why-async-task)
+    - [Async-First Architecture](#async-first-architecture)
+    - [High-Performance Serialization](#high-performance-serialization)
+    - [Production-Ready Features](#production-ready-features)
+    - [Developer Experience](#developer-experience)
+    - [Multi-Driver Flexibility](#multi-driver-flexibility)
+  - [Key Features](#key-features)
+    - [Core Capabilities](#core-capabilities)
+    - [Enterprise Features](#enterprise-features)
+    - [Integrations](#integrations)
+    - [Developer Tools](#developer-tools)
+  - [Quick Start](#quick-start)
+  - [Quick Reference](#quick-reference)
+  - [CI \& Contributing (short)](#ci--contributing-short)
+  - [Comparison with Alternatives](#comparison-with-alternatives)
+    - [Async Task vs. Celery](#async-task-vs-celery)
+    - [Async Task vs. Dramatiq](#async-task-vs-dramatiq)
+    - [Async Task vs. RQ (Redis Queue)](#async-task-vs-rq-redis-queue)
+    - [Async Task vs. Huey](#async-task-vs-huey)
+    - [Key Differentiators](#key-differentiators)
+  - [Documentation](#documentation)
+  - [Examples](#examples)
+  - [Contributing](#contributing)
+  - [License](#license)
+  - [Support](#support)
+  - [Roadmap](#roadmap)
+  - [Credits](#credits)
 
 ---
 
@@ -210,13 +218,12 @@ python -m async_task worker
 - **Coverage badge:** the repository updates `.github/coverage.svg` automatically via `.github/workflows/coverage-badge.yml`.
 - **Run full CI locally:** `just ci` (runs format/lint/typecheck/tests like the workflow).
 
-
 ## Comparison with Alternatives
 
 ### Async Task vs. Celery
 
-| Feature                 | Async Task                                         | Celery                              |
-| ----------------------- | -------------------------------------------------- | ----------------------------------- |
+| Feature                 | Async Task                                        | Celery                             |
+| ----------------------- | ------------------------------------------------- | ---------------------------------- |
 | **Async Support**       | ✅ Async-first, built with asyncio                 | ❌ No native asyncio support        |
 | **Type Safety**         | ✅ Full type hints, Generic[T]                     | ⚠️ Third-party stubs (celery-types) |
 | **Multi-Driver**        | ✅ 5 drivers (Redis/PostgreSQL/MySQL/RabbitMQ/SQS) | ⚠️ Redis/RabbitMQ/SQS brokers       |
@@ -247,8 +254,8 @@ python -m async_task worker
 
 ### Async Task vs. Dramatiq
 
-| Feature                 | Async Task              | Dramatiq                    |
-| ----------------------- | ----------------------- | --------------------------- |
+| Feature                 | Async Task             | Dramatiq                   |
+| ----------------------- | ---------------------- | -------------------------- |
 | **Async Support**       | ✅ Async-first          | ⚠️ Limited (via middleware) |
 | **Type Safety**         | ✅ Full type hints      | ✅ Type hints (py.typed)    |
 | **Multi-Driver**        | ✅ 5 drivers            | ⚠️ Redis/RabbitMQ           |
@@ -275,8 +282,8 @@ python -m async_task worker
 
 ### Async Task vs. RQ (Redis Queue)
 
-| Feature               | Async Task                        | RQ                      |
-| --------------------- | --------------------------------- | ----------------------- |
+| Feature               | Async Task                       | RQ                     |
+| --------------------- | -------------------------------- | ---------------------- |
 | **Async Support**     | ✅ Async-first                    | ❌ Sync only            |
 | **Multi-Driver**      | ✅ 5 drivers                      | ❌ Redis only           |
 | **Type Safety**       | ✅ Full type hints                | ✅ Type hints added     |
@@ -302,8 +309,8 @@ python -m async_task worker
 
 ### Async Task vs. Huey
 
-| Feature                 | Async Task                       | Huey              |
-| ----------------------- | -------------------------------- | ----------------- |
+| Feature                 | Async Task                      | Huey             |
+| ----------------------- | ------------------------------- | ---------------- |
 | **Async Support**       | ✅ Async-first                   | ⚠️ Limited async  |
 | **Multi-Driver**        | ✅ 5 drivers                     | ⚠️ Redis/SQLite   |
 | **Type Safety**         | ✅ Full type hints               | ❌ Limited        |
