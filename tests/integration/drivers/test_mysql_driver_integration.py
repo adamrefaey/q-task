@@ -983,6 +983,74 @@ class TestMySQLDriverWithRealMySQL:
         # Assert
         assert result is None
 
+    @mark.asyncio
+    async def test_management_and_task_queries(
+        self, mysql_driver: MySQLDriver, mysql_conn: asyncmy.Connection
+    ) -> None:
+        """Integration test for management queries: queue stats, tasks listing, retry/delete."""
+        # Arrange - enqueue some tasks
+        await mysql_driver.enqueue("mqueue", b"m1", delay_seconds=0)
+        await mysql_driver.enqueue("mqueue", b"m2", delay_seconds=0)
+
+        # Act - get queue stats
+        qs = await mysql_driver.get_queue_stats("mqueue")
+
+        # Assert
+        assert qs.name == "mqueue"
+        assert qs.depth >= 2
+
+        # get_all_queue_names should include our queue
+        names = await mysql_driver.get_all_queue_names()
+        assert "mqueue" in names
+
+        # get_global_stats should return counts
+        g = await mysql_driver.get_global_stats()
+        assert isinstance(g.get("pending"), int)
+
+        # get_tasks should list the tasks
+        tasks, total = await mysql_driver.get_tasks(queue="mqueue", limit=10, offset=0)
+        assert total >= 2
+        assert len(tasks) >= 2
+
+        # Dequeue and move a task to DLQ to test retry/delete
+        receipt = await mysql_driver.dequeue("mqueue", poll_seconds=0)
+        assert receipt is not None
+
+        # Force max attempts exceeded by updating attempts to max in DB then nack
+        async with mysql_conn.cursor() as cursor:
+            await cursor.execute(
+                f"UPDATE {TEST_QUEUE_TABLE} SET attempts = %s WHERE id = %s",
+                (mysql_driver.max_attempts, mysql_driver._receipt_handles[receipt]),
+            )
+
+        await mysql_driver.nack("mqueue", receipt)
+
+        # Now task should be in DLQ
+        async with mysql_conn.cursor() as cursor:
+            await cursor.execute(
+                f"SELECT id FROM {TEST_DLQ_TABLE} WHERE queue_name = %s", ("mqueue",)
+            )
+            dlq_row = await cursor.fetchone()
+            assert dlq_row is not None
+            dlq_id = dlq_row[0]
+
+        # Retry the task from DLQ
+        retried = await mysql_driver.retry_task(str(dlq_id))
+        assert retried is True
+
+        # Delete the retried task from queue
+        # Need to find the new id in queue
+        async with mysql_conn.cursor() as cursor:
+            await cursor.execute(
+                f"SELECT id FROM {TEST_QUEUE_TABLE} WHERE queue_name = %s", ("mqueue",)
+            )
+            qrow = await cursor.fetchone()
+            assert qrow is not None
+            qid = qrow[0]
+
+        deleted = await mysql_driver.delete_task(str(qid))
+        assert deleted is True
+
 
 if __name__ == "__main__":
     main([__file__, "-s", "-m", "integration"])

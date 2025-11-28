@@ -205,3 +205,156 @@ class TestMySQLDriverErrorHandling:
     # If poll_seconds > 0, deadline is always set. The else branch at line 279 is defensive
     # code that would require complex bytecode manipulation to test, which isn't practical.
     # This line can be marked with `# pragma: no cover` if desired, or we accept ~99.5% coverage.
+
+
+@mark.unit
+class TestMySQLDriverStatsAndManagement:
+    @mark.asyncio
+    async def test_get_queue_stats_and_global(self) -> None:
+        driver = MySQLDriver(dsn="mysql://user:pass@localhost:3306/dbname")
+        mock_pool = AsyncMock()
+        mock_conn = AsyncMock()
+        mock_cursor = AsyncMock()
+
+        mock_acquire_context = MagicMock()
+        mock_acquire_context.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_acquire_context.__aexit__ = AsyncMock(return_value=None)
+        mock_pool.acquire = MagicMock(return_value=mock_acquire_context)
+
+        mock_cursor_context = MagicMock()
+        mock_cursor_context.__aenter__ = AsyncMock(return_value=mock_cursor)
+        mock_cursor_context.__aexit__ = AsyncMock(return_value=None)
+        mock_conn.cursor = MagicMock(return_value=mock_cursor_context)
+
+        # Setup fetchone return values for sequence of calls
+        # get_queue_stats: depth, processing, failed
+        # get_global_stats: pending, processing, failed, total
+        mock_cursor.fetchone.side_effect = [(5,), (2,), (1,), (10,), (3,), (1,), (20,)]
+
+        driver.pool = mock_pool
+
+        qs = await driver.get_queue_stats("default")
+        assert qs.name == "default"
+        assert qs.depth == 5
+        assert qs.processing == 2
+
+        g = await driver.get_global_stats()
+        assert g["pending"] == 10
+        assert g["running"] == 3
+        assert g["failed"] == 1
+        assert g["total"] == 20
+
+    @mark.asyncio
+    async def test_get_all_queue_names_and_running_tasks(self) -> None:
+        driver = MySQLDriver(dsn="mysql://user:pass@localhost:3306/dbname")
+        mock_pool = AsyncMock()
+        mock_conn = AsyncMock()
+        mock_cursor = AsyncMock()
+
+        mock_acquire_context = MagicMock()
+        mock_acquire_context.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_acquire_context.__aexit__ = AsyncMock(return_value=None)
+        mock_pool.acquire = MagicMock(return_value=mock_acquire_context)
+
+        mock_cursor_context = MagicMock()
+        mock_cursor_context.__aenter__ = AsyncMock(return_value=mock_cursor)
+        mock_cursor_context.__aexit__ = AsyncMock(return_value=None)
+        mock_conn.cursor = MagicMock(return_value=mock_cursor_context)
+
+        # fetchall for queue names
+        mock_cursor.fetchall.side_effect = [[("q1",), ("q2",)], [(1, "q1", 1, 3, None, None)]]
+
+        driver.pool = mock_pool
+        names = await driver.get_all_queue_names()
+        assert names == ["q1", "q2"]
+
+        running = await driver.get_running_tasks(limit=1, offset=0)
+        assert isinstance(running, list)
+        assert len(running) == 1
+
+    @mark.asyncio
+    async def test_get_tasks_and_get_task_by_id(self) -> None:
+        driver = MySQLDriver(dsn="mysql://user:pass@localhost:3306/dbname")
+        mock_pool = AsyncMock()
+        mock_conn = AsyncMock()
+        mock_cursor = AsyncMock()
+
+        mock_acquire_context = MagicMock()
+        mock_acquire_context.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_acquire_context.__aexit__ = AsyncMock(return_value=None)
+        mock_pool.acquire = MagicMock(return_value=mock_acquire_context)
+
+        mock_cursor_context = MagicMock()
+        mock_cursor_context.__aenter__ = AsyncMock(return_value=mock_cursor)
+        mock_cursor_context.__aexit__ = AsyncMock(return_value=None)
+        mock_conn.cursor = MagicMock(return_value=mock_cursor_context)
+
+        # rows for get_tasks then count
+        created = None
+        mock_cursor.fetchall.side_effect = [
+            [(1, "q", "pending", 0, 3, created, created)],
+        ]
+        mock_cursor.fetchone.side_effect = [(1,), (1, "q", "pending", 0, 3, created, created)]
+
+        driver.pool = mock_pool
+        tasks, total = await driver.get_tasks(status="pending", queue="q", limit=1, offset=0)
+        assert total == 1
+        assert len(tasks) == 1
+
+        # get_task_by_id
+        mock_cursor.fetchone.side_effect = [(1, "q", "pending", 0, 3, created, created)]
+        t = await driver.get_task_by_id("1")
+        assert t is not None
+
+    @mark.asyncio
+    async def test_retry_and_delete_task(self) -> None:
+        driver = MySQLDriver(dsn="mysql://user:pass@localhost:3306/dbname")
+        mock_pool = AsyncMock()
+        mock_conn = AsyncMock()
+        mock_cursor = AsyncMock()
+
+        mock_acquire_context = MagicMock()
+        mock_acquire_context.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_acquire_context.__aexit__ = AsyncMock(return_value=None)
+        mock_pool.acquire = MagicMock(return_value=mock_acquire_context)
+
+        mock_cursor_context = MagicMock()
+        mock_cursor_context.__aenter__ = AsyncMock(return_value=mock_cursor)
+        mock_cursor_context.__aexit__ = AsyncMock(return_value=None)
+        mock_conn.cursor = MagicMock(return_value=mock_cursor_context)
+
+        # retry_task: select returns one row
+        mock_cursor.fetchone.side_effect = [
+            ("q", b"payload", 1, 3),
+        ]
+        driver.pool = mock_pool
+        mock_conn.begin = AsyncMock()
+        mock_conn.commit = AsyncMock()
+        mock_conn.rollback = AsyncMock()
+
+        ok = await driver.retry_task("1")
+        assert ok is True
+
+        # delete_task: simulate rowcount via attribute on cursor
+        def set_rowcount_zero(*a, **k):
+            mock_cursor.rowcount = 0
+
+        def set_rowcount_one(*a, **k):
+            mock_cursor.rowcount = 1
+
+        # First call: delete from queue returns 1
+        mock_cursor.execute.side_effect = set_rowcount_one
+        driver.pool = mock_pool
+        deleted = await driver.delete_task("1")
+        assert deleted is True
+
+        # Second call: delete from queue returns 0, dlq returns 1
+        mock_cursor.execute.side_effect = [set_rowcount_zero, set_rowcount_one]
+        deleted = await driver.delete_task("2")
+        assert deleted is True
+
+    @mark.asyncio
+    async def test_get_worker_stats_empty(self) -> None:
+        driver = MySQLDriver(dsn="mysql://user:pass@localhost:3306/dbname")
+        res = await driver.get_worker_stats()
+        assert res == []
