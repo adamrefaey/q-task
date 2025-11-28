@@ -5,7 +5,8 @@ from uuid import uuid4
 
 from asyncmy import Pool, create_pool
 
-from ..core.models import QueueStats, TaskInfo, WorkerInfo
+from async_task.core.models import QueueStats, TaskInfo, WorkerInfo
+
 from .base_driver import BaseDriver
 
 
