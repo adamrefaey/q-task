@@ -1,9 +1,11 @@
 name: Update coverage badge
 
-on:
+'on':
   workflow_run:
-    workflows: ["CI"]
-    types: [completed]
+    workflows:
+      - CI
+    types:
+      - completed
 
 permissions:
   actions: read
@@ -44,33 +46,45 @@ jobs:
       # The CI workflow uploads coverage.xml artifacts. The badge job should
       # download and merge those artifacts; do not re-run tests here.
 
-      - name: Extract coverage percentage
+      - name: Prepare token for artifact download
+        id: prepare-token
+        run: |
+          set -euo pipefail
+          # If GITHUB_TOKEN is missing, fall back to ARTIFACT_DOWNLOAD_TOKEN
+          if [ -n "${GITHUB_TOKEN:-}" ]; then
+            echo "using GITHUB_TOKEN"
+          elif [ -n "${ARTIFACT_DOWNLOAD_TOKEN:-}" ]; then
+            echo "GITHUB_TOKEN missing; using ARTIFACT_DOWNLOAD_TOKEN fallback"
+            export GITHUB_TOKEN="$ARTIFACT_DOWNLOAD_TOKEN"
+          else
+            echo "No token available for artifact download (GITHUB_TOKEN nor ARTIFACT_DOWNLOAD_TOKEN)"
+          fi
+
+      - name: Download coverage artifacts
+        uses: actions/download-artifact@v5
+        with:
+          # download all artifacts for the run into artifacts/
+          path: artifacts
+          github-token: ${{ env.ARTIFACT_DOWNLOAD_TOKEN || '' }}
+          repository: ${{ github.repository }}
+          run-id: ${{ github.event.workflow_run.id }}
+
+      - name: Merge coverage XMLs and extract percentage
         id: coverage
         run: |
           set -euo pipefail
-          # Attempt to download coverage artifacts from the completed CI run
-          # The workflow_run id and repository are available in the event payload
           PCT="unknown"
-          if [ -n "${{ github.event.workflow_run.id }}" ]; then
-            # Prefer the automatically provided GITHUB_TOKEN. If it's not
-            # available (possible due to org policies or runner configuration),
-            # fall back to a repository secret `ARTIFACT_DOWNLOAD_TOKEN` which
-            # should contain a PAT with repo access.
-            if [ -n "${GITHUB_TOKEN:-}" ]; then
-              echo "Using provided GITHUB_TOKEN to download artifacts"
-            elif [ -n "${ARTIFACT_DOWNLOAD_TOKEN:-}" ]; then
-              echo "GITHUB_TOKEN missing; using ARTIFACT_DOWNLOAD_TOKEN fallback"
-              export GITHUB_TOKEN="$ARTIFACT_DOWNLOAD_TOKEN"
+          # Look for coverage.xml files under the artifacts directory produced by download-artifact
+          found=0
+          for f in $(find artifacts -type f -iname 'coverage.xml' || true); do
+            found=1
+            break
+          done
+            if [ "$found" -eq 1 ]; then
+            PCT=$(python3 .github/scripts/merge_local_coverage.py artifacts || true)
             else
-              echo "No token available for artifact download (GITHUB_TOKEN nor ARTIFACT_DOWNLOAD_TOKEN)"
+            echo "No coverage.xml files found in downloaded artifacts"
             fi
-
-            if [ -n "${GITHUB_TOKEN:-}" ]; then
-              PCT=$(python3 .github/scripts/download_and_merge_artifacts.py "${{ github.event.workflow_run.id }}" "${{ github.repository }}" || true)
-            fi
-          else
-            echo "workflow_run.id not available in event payload"
-          fi
           if [ -z "${PCT:-}" ]; then
             PCT="unknown"
           fi
