@@ -1,9 +1,20 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="110" height="20" viewBox="0 0 110 20" role="img" aria-label="Coverage: 0.0%">
+<svg width="118.3" height="20" viewBox="0 0 1183 200" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" role="img" aria-label="Coverage: 0.0%">
   <title>Coverage: 0.0%</title>
-  <rect width="110" height="20" rx="3" fill="#555" />
-  <rect x="62" width="48" height="20" rx="3" fill="#9b9b9b" />
-  <g fill="#fff" font-family="Verdana,DejaVu Sans,sans-serif" font-size="11">
-    <text x="8" y="14">Coverage</text>
-    <text x="68" y="14" fill="#000">0.0%</text>
+  <linearGradient id="a" x2="0" y2="100%">
+    <stop offset="0" stop-opacity=".1" stop-color="#EEE"/>
+    <stop offset="1" stop-opacity=".1"/>
+  </linearGradient>
+  <mask id="m"><rect width="1183" height="200" rx="30" fill="#FFF"/></mask>
+  <g mask="url(#m)">
+    <rect width="783" height="200" fill="#555"/>
+    <rect width="400" height="200" fill="#E43" x="783"/>
+    <rect width="1183" height="200" fill="url(#a)"/>
   </g>
+  <g aria-hidden="true" fill="#fff" text-anchor="start" font-family="Verdana,DejaVu Sans,sans-serif" font-size="110">
+    <text x="220" y="148" textLength="523" fill="#000" opacity="0.25">Coverage</text>
+    <text x="210" y="138" textLength="523">Coverage</text>
+    <text x="838" y="148" textLength="300" fill="#000" opacity="0.25">0.0%</text>
+    <text x="828" y="138" textLength="300">0.0%</text>
+  </g>
+  <image x="40" y="35" width="130" height="130" xlink:href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgd2lkdGg9IjI0IiBoZWlnaHQ9IjI0Ij4KICA8dGl0bGU+Q29kZTwvdGl0bGU+CiAgPGRlZnM+CiAgICA8c3R5bGU+PCFbQ0RBVEFbCiAgICAgIDpyb290eyAtLWN2LWJnOiNlMzYyMDk7IC0tY3YtYXJyb3c6I2ZmZmZmZiB9CiAgICAgIEBtZWRpYSAocHJlZmVycy1jb2xvci1zY2hlbWU6IGRhcmspIHsKICAgICAgICA6cm9vdHsgLS1jdi1iZzojZmZiNTdmOyAtLWN2LWFycm93OiMxYTFhMWEgfQogICAgICB9CiAgICBdXT48L3N0eWxlPgogIDwvZGVmcz4KICA8cmVjdCB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHJ4PSI0IiBmaWxsPSJ2YXIoLS1jdi1iZykiIC8+CiAgPHBhdGggZD0iTTkgOGw0IDQtNCA0IiBzdHJva2U9InZhcigtLWN2LWFycm93KSIgc3Ryb2tlLXdpZHRoPSIxLjUiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIgZmlsbD0ibm9uZSIvPgo8L3N2Zz4K"/>
 </svg>
