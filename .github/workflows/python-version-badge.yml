@@ -20,11 +20,20 @@ jobs:
       - name: Prepare Python icon
         id: python-icon
         run: |
+          # Prefer explicit light/dark icons so CI can embed a specific file.
+          # Use the single `python.svg` icon file.
           if [ -f .github/icons/python.svg ]; then
-            ICON_BASE64=$(base64 -w0 .github/icons/python.svg)
+            ICON_FILE=.github/icons/python.svg
+          else
+            ICON_FILE=""
+          fi
+          if [ -n "$ICON_FILE" ] && [ -f "$ICON_FILE" ]; then
+            ICON_BASE64=$(base64 -w0 "$ICON_FILE")
             echo "icon=data:image/svg+xml;base64,$ICON_BASE64" >> $GITHUB_OUTPUT
+            echo "icon_path=$ICON_FILE" >> $GITHUB_OUTPUT
           else
             echo "icon=" >> $GITHUB_OUTPUT
+            echo "icon_path=" >> $GITHUB_OUTPUT
           fi
 
       - name: Generate Python version badge
@@ -39,9 +48,10 @@ jobs:
       - name: Ensure icon is embedded in SVG
         run: |
           FILE=.github/python-version.svg
-          ICON=.github/icons/python.svg
-          if [ -f "$FILE" ] && [ -f "$ICON" ]; then
-            ICON_B64=$(base64 -w0 "$ICON")
+          ICON_PATH=${{ steps.python-icon.outputs.icon_path }}
+          # If the workflow provided an icon path, embed its base64 into the badge SVG.
+          if [ -f "$FILE" ] && [ -n "$ICON_PATH" ] && [ -f "$ICON_PATH" ]; then
+            ICON_B64=$(base64 -w0 "$ICON_PATH")
             perl -0777 -pe "s/xlink:href=\"[^\"]*\"/xlink:href=\"data:image\/svg\+xml;base64,$ICON_B64\"/s" -i "$FILE"
           fi
 
@@ -63,8 +73,12 @@ jobs:
             auth_remote=$(echo "$remote_url" | sed -E "s#https://#https://${PERSONAL_ACCESS_TOKEN}@#")
             git remote set-url origin "$auth_remote"
           fi
-          # Pull latest changes to avoid conflicts with other badge workflows
+          # Stash any generated/untracked files (badge SVGs), pull latest
+          # changes, then restore. This avoids "cannot pull with rebase: You
+          # have unstaged changes" errors when multiple workflows race.
+          git stash push --include-untracked -m "badge-workflow-stash" || true
           git pull --rebase origin main || true
+          git stash pop --index || true
           git add .github/python-version.svg || true
           if ! git diff --staged --quiet; then
             if [ -n "${GPG_PRIVATE_KEY:-}" ]; then

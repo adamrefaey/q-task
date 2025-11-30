@@ -47,21 +47,25 @@ jobs:
       - name: Run tests and generate coverage report
         run: |
           set -euo pipefail
-          uv run pytest --cov=src/async_task --cov-report=term --cov-report=xml || true
+          # Explicitly write XML coverage output to coverage.xml so the
+          # downstream parsing step can find it reliably.
+          uv run pytest --cov=src/async_task --cov-report=term --cov-report=xml:coverage.xml || true
 
       - name: Extract coverage percentage
         id: coverage
         run: |
           set -euo pipefail
-          # Ensure an output exists even if parsing fails
-          echo "percentage=" >> $GITHUB_OUTPUT
+          # Default to 0.0% to avoid empty badge labels; print 'unknown' on parse errors
+          PCT="0.0%"
           if [ -f coverage.xml ]; then
-            COVERAGE=$(uv run python -c "import xml.etree.ElementTree as ET; tree = ET.parse('coverage.xml'); root = tree.getroot(); print(f\"{float(root.attrib['line-rate']) * 100:.1f}%\")" 2>/dev/null || echo "unknown")
-          else
-            COVERAGE="unknown"
+            PCT=$(python3 .github/scripts/parse_coverage.py coverage.xml || true)
           fi
-          echo "percentage=$COVERAGE" >> $GITHUB_OUTPUT
-          echo "Coverage: $COVERAGE"
+          # Ensure there's always an output set for downstream steps
+          if [ -z "${PCT:-}" ]; then
+            PCT="unknown"
+          fi
+          echo "percentage=$PCT" >> $GITHUB_OUTPUT
+          echo "Coverage: $PCT"
 
       - name: Determine coverage color
         id: coverage-color
@@ -89,10 +93,17 @@ jobs:
         id: code-icon
         run: |
           if [ -f .github/icons/codecov.svg ]; then
-            ICON_BASE64=$(base64 -w0 .github/icons/codecov.svg)
+            ICON_FILE=.github/icons/codecov.svg
+          else
+            ICON_FILE=""
+          fi
+          if [ -n "$ICON_FILE" ] && [ -f "$ICON_FILE" ]; then
+            ICON_BASE64=$(base64 -w0 "$ICON_FILE")
             echo "icon=data:image/svg+xml;base64,$ICON_BASE64" >> $GITHUB_OUTPUT
+            echo "icon_path=$ICON_FILE" >> $GITHUB_OUTPUT
           else
             echo "icon=" >> $GITHUB_OUTPUT
+            echo "icon_path=" >> $GITHUB_OUTPUT
           fi
 
       - name: Generate coverage badge with icon
@@ -107,11 +118,12 @@ jobs:
       - name: Ensure icon is embedded in SVG
         run: |
           FILE=.github/coverage.svg
-          ICON=.github/icons/codecov.svg
-          if [ -f "$FILE" ] && [ -f "$ICON" ]; then
-            ICON_B64=$(base64 -w0 "$ICON")
-            # Replace any xlink:href="..." in the file with the data URL
-            perl -0777 -pe "s/xlink:href=\"[^\"]*\"/xlink:href=\"data:image\/svg\+xml;base64,$ICON_B64\"/s" -i "$FILE"
+          ICON_PATH=${{ steps.code-icon.outputs.icon_path }}
+          if [ -f "$FILE" ] && [ -n "$ICON_PATH" ] && [ -f "$ICON_PATH" ]; then
+            ICON_B64=$(base64 -w0 "$ICON_PATH")
+            export ICON_B64
+            # Replace any xlink:href="..." or href="..." in the file with the data URL
+            sed -E -i "s/(xlink:href|href)=\"[^\"]*\"/xlink:href=\"data:image\/svg+xml;base64,$ICON_B64\"/g" "$FILE"
           fi
 
       - name: Commit coverage badge
@@ -143,8 +155,12 @@ jobs:
             auth_remote=$(echo "$remote_url" | sed -E "s#https://#https://${PERSONAL_ACCESS_TOKEN}@#")
             git remote set-url origin "$auth_remote"
           fi
-          # Pull latest changes to avoid conflicts with other badge workflows
+          # Stash any generated/untracked files (badge SVGs), pull latest
+          # changes, then restore. This avoids "cannot pull with rebase: You
+          # have unstaged changes" errors when multiple workflows race.
+          git stash push --include-untracked -m "badge-workflow-stash" || true
           git pull --rebase origin main || true
+          git stash pop --index || true
           git add .github/coverage.svg || true
           if ! git diff --staged --quiet; then
             # If a GPG private key is provided in secrets, import it and

@@ -128,8 +128,12 @@ jobs:
             auth_remote=$(echo "$remote_url" | sed -E "s#https://#https://${PERSONAL_ACCESS_TOKEN}@#")
             git remote set-url origin "$auth_remote"
           fi
-          # Pull latest changes to avoid conflicts with other badge workflows
+          # Stash any generated/untracked files (badge SVGs), pull latest
+          # changes, then restore. This avoids "cannot pull with rebase: You
+          # have unstaged changes" errors when multiple workflows race.
+          git stash push --include-untracked -m "badge-workflow-stash" || true
           git pull --rebase origin main || true
+          git stash pop --index || true
           git add .github/tests.svg || true
           if ! git diff --staged --quiet; then
             if [ -n "${GPG_PRIVATE_KEY:-}" ]; then
