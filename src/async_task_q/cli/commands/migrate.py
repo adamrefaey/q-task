@@ -33,10 +33,7 @@ async def run_migrate(args: argparse.Namespace, config: Config) -> None:
 
         driver = DriverFactory.create_from_config(config, driver_type="postgres")
 
-        try:
-            from async_task_q.drivers.postgres_driver import PostgresDriver
-        except Exception:
-            raise MigrationError("Postgres driver not available")
+        from async_task_q.drivers.postgres_driver import PostgresDriver
 
         if not isinstance(driver, PostgresDriver):
             raise MigrationError("Driver factory did not return a PostgresDriver instance")
@@ -60,10 +57,7 @@ async def run_migrate(args: argparse.Namespace, config: Config) -> None:
 
         driver = DriverFactory.create_from_config(config, driver_type="mysql")
 
-        try:
-            from async_task_q.drivers.mysql_driver import MySQLDriver
-        except Exception:
-            raise MigrationError("MySQL driver not available")
+        from async_task_q.drivers.mysql_driver import MySQLDriver
 
         if not isinstance(driver, MySQLDriver):
             raise MigrationError("Driver factory did not return a MySQLDriver instance")
