@@ -78,7 +78,7 @@ class TestRunMigrate:
             await run_migrate(args, config)
 
     @patch("async_task_q.cli.commands.migrate.isinstance")
-    @patch("async_task_q.cli.commands.migrate.PostgresDriver")
+    @patch("async_task_q.drivers.postgres_driver.PostgresDriver")
     @patch("async_task_q.cli.commands.migrate.DriverFactory")
     @patch("async_task_q.cli.commands.migrate.logger")
     @mark.asyncio
@@ -111,7 +111,7 @@ class TestRunMigrate:
         assert mock_logger.info.call_count >= 4  # Initial info + success messages
 
     @patch("async_task_q.cli.commands.migrate.isinstance")
-    @patch("async_task_q.cli.commands.migrate.PostgresDriver")
+    @patch("async_task_q.drivers.postgres_driver.PostgresDriver")
     @patch("async_task_q.cli.commands.migrate.DriverFactory")
     @mark.asyncio
     async def test_run_migrate_with_wrong_driver_type_raises_error(
@@ -132,7 +132,7 @@ class TestRunMigrate:
             await run_migrate(args, config)
 
     @patch("async_task_q.cli.commands.migrate.isinstance")
-    @patch("async_task_q.cli.commands.migrate.PostgresDriver")
+    @patch("async_task_q.drivers.postgres_driver.PostgresDriver")
     @patch("async_task_q.cli.commands.migrate.DriverFactory")
     @patch("async_task_q.cli.commands.migrate.logger")
     @mark.asyncio
@@ -168,7 +168,7 @@ class TestRunMigrate:
         assert any("custom_dlq" in str(call) for call in mock_logger.info.call_args_list)
 
     @patch("async_task_q.cli.commands.migrate.isinstance")
-    @patch("async_task_q.cli.commands.migrate.PostgresDriver")
+    @patch("async_task_q.drivers.postgres_driver.PostgresDriver")
     @patch("async_task_q.cli.commands.migrate.DriverFactory")
     @patch("async_task_q.cli.commands.migrate.logger")
     @mark.asyncio
@@ -201,7 +201,7 @@ class TestRunMigrate:
         assert any("dead_letter_queue" in str(call) for call in mock_logger.info.call_args_list)
 
     @patch("async_task_q.cli.commands.migrate.isinstance")
-    @patch("async_task_q.cli.commands.migrate.PostgresDriver")
+    @patch("async_task_q.drivers.postgres_driver.PostgresDriver")
     @patch("async_task_q.cli.commands.migrate.DriverFactory")
     @mark.asyncio
     async def test_run_migrate_disconnects_on_error(
@@ -225,7 +225,7 @@ class TestRunMigrate:
         mock_driver.disconnect.assert_awaited_once()
 
     @patch("async_task_q.cli.commands.migrate.isinstance")
-    @patch("async_task_q.cli.commands.migrate.PostgresDriver")
+    @patch("async_task_q.drivers.postgres_driver.PostgresDriver")
     @patch("async_task_q.cli.commands.migrate.DriverFactory")
     @mark.asyncio
     async def test_run_migrate_disconnects_on_connect_error(
@@ -248,7 +248,7 @@ class TestRunMigrate:
         mock_driver.disconnect.assert_awaited_once()
 
     @patch("async_task_q.cli.commands.migrate.isinstance")
-    @patch("async_task_q.cli.commands.migrate.PostgresDriver")
+    @patch("async_task_q.drivers.postgres_driver.PostgresDriver")
     @patch("async_task_q.cli.commands.migrate.DriverFactory")
     @patch("async_task_q.cli.commands.migrate.logger")
     @mark.asyncio
@@ -277,7 +277,7 @@ class TestRunMigrate:
         assert any("idx_my_queue_lookup" in str(call) for call in mock_logger.info.call_args_list)
 
     @patch("async_task_q.cli.commands.migrate.isinstance")
-    @patch("async_task_q.cli.commands.migrate.MySQLDriver")
+    @patch("async_task_q.drivers.mysql_driver.MySQLDriver")
     @patch("async_task_q.cli.commands.migrate.DriverFactory")
     @patch("async_task_q.cli.commands.migrate.logger")
     @mark.asyncio
@@ -308,7 +308,7 @@ class TestRunMigrate:
         assert mock_logger.info.call_count >= 4  # Initial info + success messages
 
     @patch("async_task_q.cli.commands.migrate.isinstance")
-    @patch("async_task_q.cli.commands.migrate.MySQLDriver")
+    @patch("async_task_q.drivers.mysql_driver.MySQLDriver")
     @patch("async_task_q.cli.commands.migrate.DriverFactory")
     @mark.asyncio
     async def test_run_migrate_with_wrong_mysql_driver_type_raises_error(
@@ -327,7 +327,7 @@ class TestRunMigrate:
             await run_migrate(args, config)
 
     @patch("async_task_q.cli.commands.migrate.isinstance")
-    @patch("async_task_q.cli.commands.migrate.MySQLDriver")
+    @patch("async_task_q.drivers.mysql_driver.MySQLDriver")
     @patch("async_task_q.cli.commands.migrate.DriverFactory")
     @patch("async_task_q.cli.commands.migrate.logger")
     @mark.asyncio
@@ -362,7 +362,7 @@ class TestRunMigrate:
         assert any("custom_dlq" in str(call) for call in mock_logger.info.call_args_list)
 
     @patch("async_task_q.cli.commands.migrate.isinstance")
-    @patch("async_task_q.cli.commands.migrate.MySQLDriver")
+    @patch("async_task_q.drivers.mysql_driver.MySQLDriver")
     @patch("async_task_q.cli.commands.migrate.DriverFactory")
     @patch("async_task_q.cli.commands.migrate.logger")
     @mark.asyncio
@@ -395,7 +395,7 @@ class TestRunMigrate:
         assert any("dead_letter_queue" in str(call) for call in mock_logger.info.call_args_list)
 
     @patch("async_task_q.cli.commands.migrate.isinstance")
-    @patch("async_task_q.cli.commands.migrate.MySQLDriver")
+    @patch("async_task_q.drivers.mysql_driver.MySQLDriver")
     @patch("async_task_q.cli.commands.migrate.DriverFactory")
     @mark.asyncio
     async def test_run_migrate_mysql_disconnects_on_error(
@@ -419,7 +419,7 @@ class TestRunMigrate:
         mock_driver.disconnect.assert_awaited_once()
 
     @patch("async_task_q.cli.commands.migrate.isinstance")
-    @patch("async_task_q.cli.commands.migrate.MySQLDriver")
+    @patch("async_task_q.drivers.mysql_driver.MySQLDriver")
     @patch("async_task_q.cli.commands.migrate.DriverFactory")
     @mark.asyncio
     async def test_run_migrate_mysql_disconnects_on_connect_error(
@@ -442,7 +442,7 @@ class TestRunMigrate:
         mock_driver.disconnect.assert_awaited_once()
 
     @patch("async_task_q.cli.commands.migrate.isinstance")
-    @patch("async_task_q.cli.commands.migrate.MySQLDriver")
+    @patch("async_task_q.drivers.mysql_driver.MySQLDriver")
     @patch("async_task_q.cli.commands.migrate.DriverFactory")
     @patch("async_task_q.cli.commands.migrate.logger")
     @mark.asyncio
