@@ -92,9 +92,7 @@ class TestAsyncTaskIntegration:
         config = Config(driver="redis")
         integration = AsyncTaskIntegration(config=config)
 
-        with patch(
-            "q_task.integrations.fastapi.DriverFactory.create_from_config"
-        ) as mock_factory:
+        with patch("q_task.integrations.fastapi.DriverFactory.create_from_config") as mock_factory:
             mock_driver = RedisDriver()
             mock_factory.return_value = mock_driver
 
@@ -110,9 +108,7 @@ class TestAsyncTaskIntegration:
 
         with (
             patch("q_task.integrations.fastapi.get_global_config") as mock_get_config,
-            patch(
-                "q_task.integrations.fastapi.DriverFactory.create_from_config"
-            ) as mock_factory,
+            patch("q_task.integrations.fastapi.DriverFactory.create_from_config") as mock_factory,
         ):
             config = Config(driver="redis")
             mock_get_config.return_value = config
