@@ -43,9 +43,10 @@ sqlalchemy = ["sqlalchemy>=2.0.44", "greenlet>=3.2.4"]
 django = ["django>=5.2.8", "psycopg2-binary>=2.9.11"]
 tortoise = ["tortoise-orm>=0.25.1"]
 fastapi = ["fastapi>=0.115.0"]
+monitor = ["redis[hiredis]>=7.1.0"]  # Required for real-time monitoring UI
 
 all = [
-    "async-task-q[redis,sqs,postgres,mysql,rabbitmq,sqlite,oracle,sqlalchemy,django,tortoise,fastapi]",
+    "async-task-q[redis,sqs,postgres,mysql,rabbitmq,sqlite,oracle,sqlalchemy,django,tortoise,fastapi,monitor]",
 ]
 
 [project.urls]

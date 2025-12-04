@@ -569,6 +569,7 @@ class TestWorkerProcessTask:
         worker = Worker(queue_driver=mock_driver, serializer=mock_serializer)
 
         task = ConcreteTask(public_param="test")
+        task._task_id = "test-task-123"  # Set task_id as deserialization would
         task_data = b"serialized_task"
 
         with (
@@ -589,6 +590,7 @@ class TestWorkerProcessTask:
         worker = Worker(queue_driver=mock_driver, serializer=mock_serializer)
 
         task = ConcreteTask(public_param="test")
+        task._task_id = "test-task-123"  # Set task_id as deserialization would
         task.timeout = 1
         task_data = b"serialized_task"
 
@@ -619,6 +621,7 @@ class TestWorkerProcessTask:
         worker = Worker(queue_driver=mock_driver, serializer=mock_serializer)
 
         task = ConcreteTask(public_param="test")
+        task._task_id = "test-task-123"  # Set task_id as deserialization would
         task.timeout = None
         task_data = b"serialized_task"
 
@@ -637,6 +640,7 @@ class TestWorkerProcessTask:
         worker = Worker(queue_driver=mock_driver, serializer=mock_serializer)
 
         task = ConcreteTask(public_param="test")
+        task._task_id = "test-task-123"  # Set task_id as deserialization would
 
         async def failing_handle():
             raise ValueError("Test error")
@@ -692,6 +696,7 @@ class TestWorkerProcessTask:
         initial_count = worker._tasks_processed
 
         task = ConcreteTask(public_param="test")
+        task._task_id = "test-task-123"  # Set task_id as deserialization would
         task_data = b"serialized_task"
 
         with patch.object(worker, "_deserialize_task", return_value=task):
@@ -910,10 +915,11 @@ class TestWorkerHandleTaskFailure:
         task.retry_delay = 60
         task.queue = "test_queue"
         exception = ValueError("Test error")
+        start_time = datetime.now(UTC)
 
         with patch.object(worker, "_serialize_task", return_value=b"serialized"):
             # Act
-            await worker._handle_task_failure(task, exception)
+            await worker._handle_task_failure(task, exception, "test_queue", start_time)
 
         # Assert
         assert task._attempts == 1
@@ -930,11 +936,12 @@ class TestWorkerHandleTaskFailure:
         task._attempts = 2
         task.max_retries = 2
         exception = ValueError("Test error")
+        start_time = datetime.now(UTC)
 
         task.failed = AsyncMock()  # type: ignore[assignment]
 
         # Act
-        await worker._handle_task_failure(task, exception)
+        await worker._handle_task_failure(task, exception, "test_queue", start_time)
 
         # Assert
         assert task._attempts == 3
@@ -951,6 +958,7 @@ class TestWorkerHandleTaskFailure:
         task = ConcreteTask(public_param="test")
         task._attempts = 0
         task.max_retries = 3
+        start_time = datetime.now(UTC)
 
         def should_retry_false(exception: Exception) -> bool:
             return False
@@ -961,7 +969,7 @@ class TestWorkerHandleTaskFailure:
         task.failed = AsyncMock()  # type: ignore[assignment]
 
         # Act
-        await worker._handle_task_failure(task, exception)
+        await worker._handle_task_failure(task, exception, "test_queue", start_time)
 
         # Assert
         assert task._attempts == 1
@@ -979,11 +987,12 @@ class TestWorkerHandleTaskFailure:
         task._attempts = 2
         task.max_retries = 2
         exception = ValueError("Test error")
+        start_time = datetime.now(UTC)
 
         task.failed = AsyncMock()  # type: ignore[assignment]
 
         # Act
-        await worker._handle_task_failure(task, exception)
+        await worker._handle_task_failure(task, exception, "test_queue", start_time)
 
         # Assert
         task.failed.assert_called_once_with(exception)
@@ -999,6 +1008,7 @@ class TestWorkerHandleTaskFailure:
         task._attempts = 2
         task.max_retries = 2
         exception = ValueError("Test error")
+        start_time = datetime.now(UTC)
 
         async def failing_failed_handler(exception: Exception) -> None:
             raise RuntimeError("Failed handler error")
@@ -1006,7 +1016,7 @@ class TestWorkerHandleTaskFailure:
         task.failed = failing_failed_handler  # type: ignore[assignment]
 
         # Act - should not raise
-        await worker._handle_task_failure(task, exception)
+        await worker._handle_task_failure(task, exception, "test_queue", start_time)
 
         # Assert
         # Exception should be caught and logged, not raised
@@ -1024,6 +1034,7 @@ class TestWorkerHandleTaskFailure:
         task.retry_delay = 60
         task.queue = "test_queue"
         exception = ValueError("Test error")
+        start_time = datetime.now(UTC)
 
         # Mock serialize to raise exception
         with (
@@ -1033,7 +1044,7 @@ class TestWorkerHandleTaskFailure:
             # Act & Assert
             # Exception should propagate (not caught in current implementation)
             with raises(ValueError, match="Serialization failed"):
-                await worker._handle_task_failure(task, exception)
+                await worker._handle_task_failure(task, exception, "test_queue", start_time)
 
     @mark.asyncio
     async def test_handle_task_failure_handles_enqueue_exception_during_retry(self) -> None:
@@ -1048,6 +1059,7 @@ class TestWorkerHandleTaskFailure:
         task.retry_delay = 60
         task.queue = "test_queue"
         exception = ValueError("Test error")
+        start_time = datetime.now(UTC)
 
         # Mock enqueue to raise exception
         mock_driver.enqueue = AsyncMock(side_effect=RuntimeError("Enqueue failed"))
@@ -1056,7 +1068,7 @@ class TestWorkerHandleTaskFailure:
             # Act & Assert
             # Exception should propagate (not caught in current implementation)
             with raises(RuntimeError, match="Enqueue failed"):
-                await worker._handle_task_failure(task, exception)
+                await worker._handle_task_failure(task, exception, "test_queue", start_time)
 
 
 @mark.unit

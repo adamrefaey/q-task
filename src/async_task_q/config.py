@@ -65,6 +65,9 @@ ENV_VAR_MAPPING: dict[str, tuple[str, Any, Callable[[str], Any]]] = {
     "rabbitmq_url": ("async_task_q_RABBITMQ_URL", "amqp://guest:guest@localhost:5672/", str),
     "rabbitmq_exchange_name": ("async_task_q_RABBITMQ_EXCHANGE_NAME", "async_task_q", str),
     "rabbitmq_prefetch_count": ("async_task_q_RABBITMQ_PREFETCH_COUNT", "1", int),
+    # Events/Monitoring configuration
+    "events_redis_url": ("async_task_q_EVENTS_REDIS_URL", None, str),
+    "events_channel": ("async_task_q_EVENTS_CHANNEL", "async_task_q:events", str),
     # Task defaults
     "default_queue": ("async_task_q_DEFAULT_QUEUE", "default", str),
     "default_max_retries": ("async_task_q_MAX_RETRIES", "3", int),
@@ -116,6 +119,11 @@ class Config:
     rabbitmq_url: str = "amqp://guest:guest@localhost:5672/"
     rabbitmq_exchange_name: str = "async_task_q"
     rabbitmq_prefetch_count: int = 1
+
+    # Events/Monitoring configuration
+    # If None, falls back to redis_url for Pub/Sub events
+    events_redis_url: str | None = None
+    events_channel: str = "async_task_q:events"
 
     # Task defaults
     default_queue: str = "default"
@@ -332,6 +340,15 @@ def set_global_config(**overrides) -> None:
         rabbitmq_prefetch_count (int): RabbitMQ consumer prefetch count
             Env var: async_task_q_RABBITMQ_PREFETCH_COUNT
             Default: 1
+
+    Events/Monitoring Options:
+        events_redis_url (str | None): Redis URL for event Pub/Sub (monitor integration)
+            Env var: async_task_q_EVENTS_REDIS_URL
+            Default: None (falls back to redis_url)
+
+        events_channel (str): Redis Pub/Sub channel for events
+            Env var: async_task_q_EVENTS_CHANNEL
+            Default: "async_task_q:events"
 
     Examples:
         # Basic configuration with Redis

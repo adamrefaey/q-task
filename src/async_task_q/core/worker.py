@@ -1,15 +1,19 @@
 import asyncio
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import UTC, datetime
 import importlib.util
 import logging
 from pathlib import Path
 import signal
+import socket
+import traceback
+import uuid
 
 from async_task_q.drivers.base_driver import BaseDriver
 from async_task_q.serializers.base_serializer import BaseSerializer
 from async_task_q.serializers.msgpack_serializer import MsgpackSerializer
 
+from .events import EventEmitter, EventType, TaskEvent, WorkerEvent
 from .task import Task
 
 logger = logging.getLogger(__name__)
@@ -55,16 +59,25 @@ class Worker:
         concurrency: int = 10,
         max_tasks: int | None = None,  # None = run indefinitely (production default)
         serializer: BaseSerializer | None = None,
+        event_emitter: EventEmitter | None = None,
+        worker_id: str | None = None,
+        heartbeat_interval: float = 60.0,
     ) -> None:
         self.queue_driver = queue_driver
         self.queues = list(queues) if queues else ["default"]
         self.concurrency = concurrency
         self.max_tasks = max_tasks  # None = continuous operation, N = stop after N tasks
         self.serializer = serializer or MsgpackSerializer()
+        self.event_emitter = event_emitter
+        self.worker_id = worker_id or f"worker-{uuid.uuid4().hex[:8]}"
+        self.hostname = socket.gethostname()
+        self.heartbeat_interval = heartbeat_interval
 
         self._running = False
-        self._tasks: set[asyncio.Task] = set()
+        self._tasks: set[asyncio.Task[None]] = set()
         self._tasks_processed = 0
+        self._start_time: datetime | None = None
+        self._heartbeat_task: asyncio.Task[None] | None = None
 
     async def start(self) -> None:
         """Start the worker loop and block until shutdown.
@@ -82,6 +95,7 @@ class Worker:
             await worker.start()  # Blocks until shutdown
         """
         self._running = True
+        self._start_time = datetime.now(UTC)
 
         # Ensure driver is connected
         await self.queue_driver.connect()
@@ -91,14 +105,81 @@ class Worker:
         for sig in (signal.SIGTERM, signal.SIGINT):
             loop.add_signal_handler(sig, self._handle_shutdown)
 
-        logger.info(f"Worker starting: queues={self.queues}, concurrency={self.concurrency}")
+        logger.info(
+            "Worker %s starting: queues=%s, concurrency=%d",
+            self.worker_id,
+            self.queues,
+            self.concurrency,
+        )
+
+        # Emit worker_online event
+        if self.event_emitter:
+            await self.event_emitter.emit_worker_event(
+                WorkerEvent(
+                    event_type=EventType.WORKER_ONLINE,
+                    worker_id=self.worker_id,
+                    hostname=self.hostname,
+                    queues=tuple(self.queues),
+                    freq=self.heartbeat_interval,
+                )
+            )
+
+        # Start heartbeat loop
+        if self.event_emitter:
+            self._heartbeat_task = asyncio.create_task(
+                self._heartbeat_loop(), name=f"{self.worker_id}-heartbeat"
+            )
 
         try:
             await self._run()
         finally:
             await self._cleanup()
 
-    async def _run(self):
+    async def _heartbeat_loop(self) -> None:
+        """Send periodic heartbeat events (default: every 60 seconds).
+
+        The heartbeat contains worker status including:
+        - Number of active tasks (currently executing)
+        - Total tasks processed
+        - Worker uptime
+        - Configured queues
+
+        If a worker hasn't sent a heartbeat in 2× the heartbeat interval,
+        it should be considered offline by the monitoring system.
+        """
+        while self._running:
+            try:
+                await asyncio.sleep(self.heartbeat_interval)
+
+                if not self._running:
+                    break
+
+                uptime = (
+                    int((datetime.now(UTC) - self._start_time).total_seconds())
+                    if self._start_time
+                    else 0
+                )
+
+                if self.event_emitter:
+                    await self.event_emitter.emit_worker_event(
+                        WorkerEvent(
+                            event_type=EventType.WORKER_HEARTBEAT,
+                            worker_id=self.worker_id,
+                            hostname=self.hostname,
+                            freq=self.heartbeat_interval,
+                            active=len(self._tasks),
+                            processed=self._tasks_processed,
+                            queues=tuple(self.queues),
+                            uptime_seconds=uptime,
+                        )
+                    )
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.warning("Failed to send heartbeat: %s", e)
+
+    async def _run(self) -> None:
         """Main worker loop - continuously processes tasks until stopped.
 
         Loop behavior:
@@ -171,9 +252,11 @@ class Worker:
 
         Workflow:
         1. Deserialize task from bytes
-        2. Execute task.handle() with optional timeout
-        3. Handle failures with retry logic
-        4. Increment processed task counter
+        2. Emit task_started event
+        3. Execute task.handle() with optional timeout
+        4. Emit task_completed or task_failed event
+        5. Handle failures with retry logic
+        6. Increment processed task counter
 
         Error handling:
         - DeserializationError: Re-enqueue raw task_data for retry
@@ -186,20 +269,51 @@ class Worker:
             queue_name: Name of the queue the task came from
         """
         task: Task | None = None
+        start_time = datetime.now(UTC)
 
         try:
             # Deserialize task
             task = await self._deserialize_task(task_data)
 
             assert task is not None
+            assert task._task_id is not None  # Task ID is set during deserialization
 
             logger.info(f"Processing task {task._task_id}: {task.__class__.__name__}")
+
+            # Emit task_started event
+            if self.event_emitter:
+                await self.event_emitter.emit_task_event(
+                    TaskEvent(
+                        event_type=EventType.TASK_STARTED,
+                        task_id=task._task_id,
+                        task_name=task.__class__.__name__,
+                        queue=queue_name,
+                        worker_id=self.worker_id,
+                        attempt=task._attempts + 1,
+                    )
+                )
 
             # Execute task with timeout
             if task.timeout:
                 await asyncio.wait_for(task.handle(), timeout=task.timeout)
             else:
                 await task.handle()
+
+            # Calculate duration
+            duration_ms = int((datetime.now(UTC) - start_time).total_seconds() * 1000)
+
+            # Emit task_completed event
+            if self.event_emitter:
+                await self.event_emitter.emit_task_event(
+                    TaskEvent(
+                        event_type=EventType.TASK_COMPLETED,
+                        task_id=task._task_id,
+                        task_name=task.__class__.__name__,
+                        queue=queue_name,
+                        worker_id=self.worker_id,
+                        duration_ms=duration_ms,
+                    )
+                )
 
             # Task succeeded - acknowledge and remove from queue
             logger.info(f"Task {task._task_id} completed successfully")
@@ -214,7 +328,8 @@ class Worker:
             except Exception as ack_error:
                 # Log ack error but don't fail the task - it already completed successfully
                 logger.error(
-                    f"Failed to acknowledge task {task._task_id} from queue '{queue_name}': {ack_error}"
+                    f"Failed to acknowledge task {task._task_id} from queue '{queue_name}': "
+                    f"{ack_error}"
                 )
                 logger.exception(ack_error)
             self._tasks_processed += 1
@@ -233,7 +348,7 @@ class Worker:
             else:
                 # ValueError/TypeError during task execution - handle as task failure
                 logger.exception(f"Task {task._task_id} failed: {e}")
-                await self._handle_task_failure(task, e)
+                await self._handle_task_failure(task, e, queue_name, start_time)
 
         except TimeoutError as e:
             if task is None:
@@ -247,7 +362,9 @@ class Worker:
             else:
                 # TimeoutError during task execution - handle as task failure
                 logger.error(f"Task {task._task_id} timed out")
-                await self._handle_task_failure(task, TimeoutError("Task exceeded timeout"))
+                await self._handle_task_failure(
+                    task, TimeoutError("Task exceeded timeout"), queue_name, start_time
+                )
 
         except Exception as e:
             if task is None:
@@ -260,32 +377,51 @@ class Worker:
                 await self.queue_driver.enqueue(queue_name, task_data, delay_seconds=60)
             else:
                 logger.exception(f"Task {task._task_id} failed: {e}")
-                await self._handle_task_failure(task, e)
+                await self._handle_task_failure(task, e, queue_name, start_time)
 
         # Note: Python 3.11+ ExceptionGroup can be used to collect
         # multiple errors if task spawns subtasks
 
-    async def _handle_task_failure(self, task: Task, exception: Exception) -> None:
+    async def _handle_task_failure(
+        self, task: Task, exception: Exception, queue_name: str, start_time: datetime
+    ) -> None:
         """Handle task failure with intelligent retry logic.
 
         Retry decision:
         1. Increment task._attempts counter
         2. Check if attempts < max_retries
         3. Call task.should_retry(exception) for custom logic
-        4. If both pass: re-enqueue with retry_delay
-        5. If retry exhausted: call task.failed() and store error
+        4. If both pass: emit task_retrying and re-enqueue with retry_delay
+        5. If retry exhausted: emit task_failed, call task.failed() and store error
 
         Args:
             task: Failed task instance
             exception: Exception that caused the failure
+            queue_name: Name of the queue the task came from
+            start_time: When task processing started
         """
         task._attempts += 1
+        duration_ms = int((datetime.now(UTC) - start_time).total_seconds() * 1000)
+        task_id = task._task_id or "unknown"  # Fallback for type safety
 
         # Check if we should retry
         if task._attempts < task.max_retries and task.should_retry(exception):
-            logger.info(
-                f"Retrying task {task._task_id} (attempt {task._attempts}/{task.max_retries})"
-            )
+            logger.info(f"Retrying task {task_id} (attempt {task._attempts}/{task.max_retries})")
+
+            # Emit task_retrying event
+            if self.event_emitter:
+                await self.event_emitter.emit_task_event(
+                    TaskEvent(
+                        event_type=EventType.TASK_RETRYING,
+                        task_id=task_id,
+                        task_name=task.__class__.__name__,
+                        queue=queue_name,
+                        worker_id=self.worker_id,
+                        attempt=task._attempts,
+                        error=str(exception),
+                        duration_ms=duration_ms,
+                    )
+                )
 
             # Re-enqueue with delay
             serialized_task = await self._serialize_task(task)
@@ -294,7 +430,23 @@ class Worker:
             )
         else:
             # Task has failed permanently
-            logger.error(f"Task {task._task_id} failed permanently after {task._attempts} attempts")
+            logger.error(f"Task {task_id} failed permanently after {task._attempts} attempts")
+
+            # Emit task_failed event
+            if self.event_emitter:
+                await self.event_emitter.emit_task_event(
+                    TaskEvent(
+                        event_type=EventType.TASK_FAILED,
+                        task_id=task_id,
+                        task_name=task.__class__.__name__,
+                        queue=queue_name,
+                        worker_id=self.worker_id,
+                        duration_ms=duration_ms,
+                        error=str(exception),
+                        traceback=traceback.format_exc(),
+                        attempt=task._attempts,
+                    )
+                )
 
             try:
                 await task.failed(exception)
@@ -450,8 +602,34 @@ class Worker:
         """
         logger.info("Waiting for running tasks to complete...")
 
+        # Cancel heartbeat task
+        if self._heartbeat_task:
+            self._heartbeat_task.cancel()
+            try:
+                await self._heartbeat_task
+            except asyncio.CancelledError:
+                pass
+
         if self._tasks:
             await asyncio.wait(self._tasks)
+
+        # Emit worker_offline event
+        if self.event_emitter:
+            uptime = (
+                int((datetime.now(UTC) - self._start_time).total_seconds())
+                if self._start_time
+                else 0
+            )
+            await self.event_emitter.emit_worker_event(
+                WorkerEvent(
+                    event_type=EventType.WORKER_OFFLINE,
+                    worker_id=self.worker_id,
+                    hostname=self.hostname,
+                    processed=self._tasks_processed,
+                    uptime_seconds=uptime,
+                )
+            )
+            await self.event_emitter.close()
 
         # Disconnect driver
         await self.queue_driver.disconnect()

@@ -10,6 +10,7 @@ from async_task_q.drivers.base_driver import BaseDriver
 from async_task_q.serializers import BaseSerializer, MsgpackSerializer
 
 from .driver_factory import DriverFactory
+from .events import EventEmitter, EventType, TaskEvent
 
 if TYPE_CHECKING:
     from .task import FunctionTask, Task
@@ -28,15 +29,18 @@ class Dispatcher:
     Attributes:
         driver: Default queue driver for tasks without driver override
         serializer: Task serializer (default: MsgpackSerializer)
+        event_emitter: Optional event emitter for monitoring integration
     """
 
     def __init__(
         self,
         driver: BaseDriver,
         serializer: BaseSerializer | None = None,
+        event_emitter: EventEmitter | None = None,
     ) -> None:
         self.driver = driver
         self.serializer = serializer or MsgpackSerializer()
+        self.event_emitter = event_emitter
         self._driver_cache: dict[str, BaseDriver] = {}  # Cache for driver overrides
 
     def _get_driver(self, task: "Task") -> BaseDriver:
@@ -106,6 +110,18 @@ class Dispatcher:
 
         # Enqueue
         await driver.enqueue(target_queue, serialized_task, delay_seconds)
+
+        # Emit task_enqueued event
+        if self.event_emitter:
+            await self.event_emitter.emit_task_event(
+                TaskEvent(
+                    event_type=EventType.TASK_ENQUEUED,
+                    task_id=task_id,
+                    task_name=task.__class__.__name__,
+                    queue=target_queue,
+                    worker_id="dispatcher",  # Not yet assigned to a worker
+                )
+            )
 
         logger.info(
             f"Dispatching task {task_id}: {task.__class__.__name__} "

@@ -92,6 +92,8 @@ class TestEnvVarMapping:
             "rabbitmq_url",
             "rabbitmq_exchange_name",
             "rabbitmq_prefetch_count",
+            "events_redis_url",
+            "events_channel",
             "default_queue",
             "default_max_retries",
             "default_retry_delay",
@@ -173,6 +175,14 @@ class TestConfigDefaults:
         assert config.default_max_retries == 3
         assert config.default_retry_delay == 60
         assert config.default_timeout is None
+
+    def test_config_default_events_settings(self) -> None:
+        # Act
+        config = Config()
+
+        # Assert
+        assert config.events_redis_url is None  # Falls back to redis_url
+        assert config.events_channel == "async_task_q:events"
 
 
 @mark.unit
@@ -269,6 +279,26 @@ class TestConfigFromEnv:
         assert config.default_max_retries == 5
         assert config.default_retry_delay == 120
         assert config.default_timeout == 300
+
+    def test_from_env_loads_events_settings(self, monkeypatch) -> None:
+        # Arrange
+        monkeypatch.setenv("async_task_q_EVENTS_REDIS_URL", "redis://events:6379")
+        monkeypatch.setenv("async_task_q_EVENTS_CHANNEL", "my_app:events")
+
+        # Act
+        config = Config.from_env()
+
+        # Assert
+        assert config.events_redis_url == "redis://events:6379"
+        assert config.events_channel == "my_app:events"
+
+    def test_from_env_events_redis_url_defaults_to_none(self, clean_env) -> None:
+        # Act
+        config = Config.from_env()
+
+        # Assert - events_redis_url defaults to None (falls back to redis_url at usage time)
+        assert config.events_redis_url is None
+        assert config.events_channel == "async_task_q:events"
 
     def test_from_env_with_overrides(self, clean_env) -> None:
         # Act
