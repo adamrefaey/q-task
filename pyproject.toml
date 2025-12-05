@@ -3,7 +3,7 @@ name = "asynctasq"
 version = "0.9.6"
 description = "Async TasQ: A modern, async-first, type-safe task queue Python package inspired by Laravel. Native FastAPI integration. Switch between multiple queue backends (Redis, PostgreSQL, MySQL, RabbitMQ, AWS SQS) with one config line. Automatic, smart ORM serialization (SQLAlchemy, Django, Tortoise) using msgpack reduces payloads by 90%+."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 license = { text = "MIT" }
 authors = [{ name = "Adam Refaey" }]
 keywords = [
@@ -15,13 +15,15 @@ keywords = [
     "sqs",
     "background-tasks",
     "worker",
+    "fastapi",
+    "sqlalchemy",
+    "django",
+    "tortoise-orm",
 ]
 classifiers = [
-    "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
@@ -79,7 +81,7 @@ dev = [
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = [
@@ -106,7 +108,7 @@ max-returns = 6
 max-statements = 50
 
 [tool.pyright]
-pythonVersion = "3.11"
+pythonVersion = "3.12"
 typeCheckingMode = "standard"
 
 [tool.pytest.ini_options]

@@ -63,9 +63,9 @@ jobs:
       - name: Download coverage artifacts
         uses: actions/download-artifact@v5
         with:
-          # Download only Python 3.11 coverage artifacts (both unit and integration)
+          # Download only Python 3.12 coverage artifacts (both unit and integration)
           # to get representative coverage without duplicates from other Python versions
-          pattern: coverage-*-3.11
+          pattern: coverage-*-3.12
           path: artifacts
           github-token: ${{ env.ARTIFACT_DOWNLOAD_TOKEN || '' }}
           repository: ${{ github.repository }}

@@ -30,7 +30,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.11"
+          python-version: "3.12"
           cache: "pip"
           cache-dependency-path: pyproject.toml
 
@@ -39,7 +39,7 @@ jobs:
         with:
           path: |
             ~/.cache/uv
-          key: ${{ runner.os }}-uv-3.11-${{ hashFiles('uv.lock') || hashFiles('pyproject.toml') }}
+          key: ${{ runner.os }}-uv-3.12-${{ hashFiles('uv.lock') || hashFiles('pyproject.toml') }}
           restore-keys: |
             ${{ runner.os }}-uv-
 
@@ -92,7 +92,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12", "3.13", "3.14"]
+        python-version: ["3.12", "3.13", "3.14"]
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -156,7 +156,7 @@ jobs:
           path: coverage.xml
 
       - name: Upload coverage to Codecov
-        if: matrix.python-version == '3.11'
+        if: matrix.python-version == '3.12'
         uses: codecov/codecov-action@v5
         with:
           files: ./coverage.xml
@@ -170,7 +170,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12", "3.13", "3.14"]
+        python-version: ["3.12", "3.13", "3.14"]
 
     services:
       localstack:
@@ -383,7 +383,7 @@ jobs:
           path: coverage.xml
 
       - name: Upload coverage to Codecov
-        if: matrix.python-version == '3.11'
+        if: matrix.python-version == '3.12'
         uses: codecov/codecov-action@v5
         with:
           files: ./coverage.xml
