@@ -1,20 +1,20 @@
-<svg width="98.5" height="20" viewBox="0 0 985 200" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" role="img" aria-label="Tests: failing">
-  <title>Tests: failing</title>
+<svg width="106.9" height="20" viewBox="0 0 1069 200" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" role="img" aria-label="Tests: passing">
+  <title>Tests: passing</title>
   <linearGradient id="a" x2="0" y2="100%">
     <stop offset="0" stop-opacity=".1" stop-color="#EEE"/>
     <stop offset="1" stop-opacity=".1"/>
   </linearGradient>
-  <mask id="m"><rect width="985" height="200" rx="30" fill="#FFF"/></mask>
+  <mask id="m"><rect width="1069" height="200" rx="30" fill="#FFF"/></mask>
   <g mask="url(#m)">
     <rect width="551" height="200" fill="#555"/>
-    <rect width="434" height="200" fill="#E43" x="551"/>
-    <rect width="985" height="200" fill="url(#a)"/>
+    <rect width="518" height="200" fill="#brightgreen" x="551"/>
+    <rect width="1069" height="200" fill="url(#a)"/>
   </g>
   <g aria-hidden="true" fill="#fff" text-anchor="start" font-family="Verdana,DejaVu Sans,sans-serif" font-size="110">
     <text x="220" y="148" textLength="291" fill="#000" opacity="0.25">Tests</text>
     <text x="210" y="138" textLength="291">Tests</text>
-    <text x="606" y="148" textLength="334" fill="#000" opacity="0.25">failing</text>
-    <text x="596" y="138" textLength="334">failing</text>
+    <text x="606" y="148" textLength="418" fill="#000" opacity="0.25">passing</text>
+    <text x="596" y="138" textLength="418">passing</text>
   </g>
   <image x="40" y="35" width="130" height="130" xlink:href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgd2lkdGg9IjI0IiBoZWlnaHQ9IjI0Ij4KICA8dGl0bGU+UHl0ZXN0PC90aXRsZT4KICA8ZGVmcz4KICAgIDxzdHlsZT48IVtDREFUQVsKICAgICAgOnJvb3R7IC0tcHQtYmc6IzRCOEJCRTsgLS1wdC1zdHJva2U6I0ZGRTg3MyB9CiAgICAgIEBtZWRpYSAocHJlZmVycy1jb2xvci1zY2hlbWU6IGRhcmspIHsKICAgICAgICA6cm9vdHsgLS1wdC1iZzojOWNjM2ZmOyAtLXB0LXN0cm9rZTojZmZmM2I4IH0KICAgICAgfQogICAgXV0+PC9zdHlsZT4KICA8L2RlZnM+CiAgPGNpcmNsZSBjeD0iMTIiIGN5PSIxMiIgcj0iMTAiIGZpbGw9InZhcigtLXB0LWJnKSIgLz4KICA8cGF0aCBkPSJNOCAxMmMxLjUtMyA2LTMgNyAwIiBzdHJva2U9InZhcigtLXB0LXN0cm9rZSkiIHN0cm9rZS13aWR0aD0iMS41IiBmaWxsPSJub25lIiBzdHJva2UtbGluZWNhcD0icm91bmQiLz4KPC9zdmc+Cg=="/>
 </svg>
