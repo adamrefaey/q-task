@@ -122,3 +122,36 @@ python -m asynctasq worker \
 - Zero-configuration with environment variables
 - Dependency injection for dispatcher and driver access
 - Works with all drivers (Redis, PostgreSQL, MySQL, RabbitMQ, AWS SQS)
+
+---
+
+## Event Streaming with FastAPI
+
+For real-time monitoring, you can stream task events via WebSocket:
+
+```python
+from fastapi import FastAPI, WebSocket
+from asynctasq.integrations.fastapi import AsyncTaskIntegration
+from asynctasq.core.events import EventSubscriber
+
+asynctasq = AsyncTaskIntegration()
+app = FastAPI(lifespan=asynctasq.lifespan)
+
+@app.websocket("/events")
+async def events_websocket(websocket: WebSocket):
+    await websocket.accept()
+    
+    subscriber = EventSubscriber(redis_url="redis://localhost:6379")
+    await subscriber.connect()
+    
+    try:
+        async for event in subscriber.listen():
+            await websocket.send_json({
+                "type": event.event_type,
+                "task_id": event.task_id,
+                "task_name": event.task_name,
+                "timestamp": event.timestamp.isoformat()
+            })
+    finally:
+        await subscriber.disconnect()
+```

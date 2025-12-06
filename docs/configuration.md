@@ -75,6 +75,13 @@ export AWS_ACCESS_KEY_ID=your_access_key
 export AWS_SECRET_ACCESS_KEY=your_secret_key
 ```
 
+**Events Configuration (Redis Pub/Sub):**
+
+```bash
+export asynctasq_EVENTS_REDIS_URL=redis://localhost:6379  # Separate Redis for events (optional)
+export asynctasq_EVENTS_CHANNEL=asynctasq:events          # Pub/Sub channel name
+```
+
 ---
 
 ## Method 2: Programmatic Configuration
@@ -223,3 +230,10 @@ python -m asynctasq worker \
 | `sqs_queue_url_prefix`  | `asynctasq_SQS_QUEUE_PREFIX` | `None`      | SQS queue URL prefix                                 |
 | `aws_access_key_id`     | `AWS_ACCESS_KEY_ID`           | `None`      | AWS access key (optional, uses AWS credential chain) |
 | `aws_secret_access_key` | `AWS_SECRET_ACCESS_KEY`       | `None`      | AWS secret key (optional, uses AWS credential chain) |
+
+**Events Options (Redis Pub/Sub):**
+
+| Option              | Env Var                         | Default            | Description                                       |
+| ------------------- | ------------------------------- | ------------------ | ------------------------------------------------- |
+| `events_redis_url`  | `asynctasq_EVENTS_REDIS_URL`   | `None`             | Dedicated Redis URL for events (falls back to redis_url) |
+| `events_channel`    | `asynctasq_EVENTS_CHANNEL`     | `asynctasq:events` | Pub/Sub channel name for task events              |

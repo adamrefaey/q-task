@@ -123,7 +123,37 @@ python -m asynctasq worker --queues low-priority --concurrency 5 &
 - Task execution times (p50, p95, p99)
 - Retry rates (alert on high retry rates)
 
-**Example Monitoring Script:**
+**Using Event Streaming for Real-Time Monitoring:**
+
+```python
+from asynctasq.core.events import create_event_emitter, EventSubscriber
+from asynctasq.core.worker import Worker
+
+# Worker with event streaming
+async def start_worker_with_events():
+    emitter = create_event_emitter(redis_url="redis://localhost:6379")
+    
+    worker = Worker(
+        queue_driver=driver,
+        queues=['default'],
+        event_emitter=emitter,
+        worker_id="worker-1"
+    )
+    await worker.start()
+
+# Event consumer for monitoring
+async def consume_events():
+    subscriber = EventSubscriber(redis_url="redis://localhost:6379")
+    await subscriber.connect()
+    
+    async for event in subscriber.listen():
+        if event.event_type == "task_failed":
+            await send_alert(f"Task {event.task_id} failed: {event.error}")
+        elif event.event_type == "task_completed":
+            log_metric("task_duration_ms", event.duration_ms)
+```
+
+**Example Queue Health Check:**
 
 ```python
 from asynctasq.config import Config
@@ -136,12 +166,12 @@ async def check_queue_health():
 
     try:
         for queue in ['critical', 'default', 'low-priority']:
-            size = await driver.get_queue_size(queue)
-            print(f"Queue '{queue}': {size} tasks")
+            stats = await driver.get_queue_stats(queue)
+            print(f"Queue '{queue}': {stats.depth} pending, {stats.processing} processing")
 
             # Alert if queue is too large
-            if size > 1000:
-                await send_alert(f"Queue '{queue}' has {size} tasks")
+            if stats.depth > 1000:
+                await send_alert(f"Queue '{queue}' has {stats.depth} tasks")
     finally:
         await driver.disconnect()
 ```

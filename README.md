@@ -3,17 +3,20 @@
 [![Tests](https://raw.githubusercontent.com/adamrefaey/asynctasq/main/.github/tests.svg)](https://github.com/adamrefaey/asynctasq/actions/workflows/ci.yml)
 [![Coverage](https://raw.githubusercontent.com/adamrefaey/asynctasq/main/.github/coverage.svg)](https://raw.githubusercontent.com/adamrefaey/asynctasq/main/.github/coverage.svg)
 [![Python Version](https://raw.githubusercontent.com/adamrefaey/asynctasq/main/.github/python-version.svg)](https://www.python.org/downloads/)
+[![PyPI Version](https://img.shields.io/pypi/v/asynctasq)](https://pypi.org/project/asynctasq/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A modern, async-first, type-safe task queue Python package inspired by Laravel. Native FastAPI integration. Switch between multiple queue backends (Redis, PostgreSQL, MySQL, RabbitMQ, AWS SQS) with one config line. Automatic ORM serialization (SQLAlchemy, Django, Tortoise) using msgpack reduces payloads by 90%+. Features ACID guarantees, dead-letter queues, crash recovery.
+A modern, async-first, type-safe task queue for Python 3.12+. Inspired by Laravel's elegant queue system. Native FastAPI integration. Switch between multiple queue backends (Redis, PostgreSQL, MySQL, RabbitMQ, AWS SQS) with one config line. Automatic ORM serialization (SQLAlchemy, Django, Tortoise) using msgpack reduces payloads by 90%+. Features ACID guarantees, dead-letter queues, crash recovery, and real-time event streaming.
+
+> 📊 **Looking for a monitoring dashboard?** Check out **[asynctasq-monitor](https://github.com/adamrefaey/asynctasq-monitor)** – a beautiful real-time UI to monitor your tasks, workers, and queues.
 
 ---
 
 ## Table of Contents
 
-- [Async TasQ](#asynctasq)
+- [Async TasQ](#async-tasq)
   - [Table of Contents](#table-of-contents)
-  - [Why Async TasQ?](#why-asynctasq)
+  - [Why Async TasQ?](#why-async-tasq)
     - [Async-First Architecture](#async-first-architecture)
     - [High-Performance Serialization](#high-performance-serialization)
     - [Production-Ready Features](#production-ready-features)
@@ -28,11 +31,13 @@ A modern, async-first, type-safe task queue Python package inspired by Laravel. 
   - [Quick Reference](#quick-reference)
   - [CI \& Contributing (short)](#ci--contributing-short)
   - [Comparison with Alternatives](#comparison-with-alternatives)
-    - [Async TasQ vs. Celery](#asynctasq-vs-celery)
-    - [Async TasQ vs. Dramatiq](#asynctasq-vs-dramatiq)
-    - [Async TasQ vs. RQ (Redis Queue)](#asynctasq-vs-rq-redis-queue)
-    - [Async TasQ vs. Huey](#asynctasq-vs-huey)
+    - [Async TasQ vs. Celery](#async-tasq-vs-celery)
+    - [Async TasQ vs. Dramatiq](#async-tasq-vs-dramatiq)
+    - [Async TasQ vs. RQ (Redis Queue)](#async-tasq-vs-rq-redis-queue)
+    - [Async TasQ vs. Huey](#async-tasq-vs-huey)
     - [Key Differentiators](#key-differentiators)
+  - [📊 Monitoring Dashboard](#-monitoring-dashboard)
+    - [asynctasq-monitor](#asynctasq-monitor)
   - [Documentation](#documentation)
   - [Examples](#examples)
   - [Contributing](#contributing)
@@ -67,6 +72,7 @@ A modern, async-first, type-safe task queue Python package inspired by Laravel. 
 - **Graceful shutdown** – SIGTERM/SIGINT handlers wait for in-flight tasks to complete
 - **Configurable retries** – Per-task retry logic with custom `should_retry()` hooks
 - **Task timeouts** – Prevent runaway tasks with per-task timeout configuration
+- **Real-time events** – Redis Pub/Sub event streaming for task lifecycle monitoring
 
 ### Developer Experience
 
@@ -126,6 +132,8 @@ A modern, async-first, type-safe task queue Python package inspired by Laravel. 
 
   - ✅ **Concurrent processing** with configurable worker concurrency
 
+  - ✅ **Real-time event streaming** via Redis Pub/Sub
+
 ### Integrations
 
   - ✅ **FastAPI** – Automatic lifecycle management, dependency injection
@@ -135,6 +143,8 @@ A modern, async-first, type-safe task queue Python package inspired by Laravel. 
   - ✅ **Django ORM** – Native async support (Django 3.1+)
 
   - ✅ **Tortoise ORM** – Full async ORM integration
+
+  - ✅ **[asynctasq-monitor](https://github.com/adamrefaey/asynctasq-monitor)** – Real-time monitoring dashboard (optional)
 
 ### Developer Tools
 
@@ -155,7 +165,7 @@ A modern, async-first, type-safe task queue Python package inspired by Laravel. 
 Get started in 60 seconds:
 
 ```bash
-# Install Async TasQ
+# Install Async TasQ (Python 3.12+ required)
 uv add asynctasq[redis]
 ```
 
@@ -166,7 +176,7 @@ from asynctasq.config import set_global_config
 from asynctasq.core.task import task
 
 # 1. Configure (or use environment variables)
-set_global_config(driver="redis", redis_url="redis://localhost:6379", redis_password=None)
+set_global_config(driver="redis", redis_url="redis://localhost:6379")
 
 
 # 2. Define a task
@@ -192,11 +202,11 @@ if __name__ == "__main__":
 ```
 
 ```bash
-# Run the worker
+# Run the worker (in a separate terminal)
 python -m asynctasq worker
 ```
 
-**That's it!** Your first Async TasQueue is ready. Now let's explore the powerful features.
+**That's it!** Your first Async TasQ is ready. Now let's explore the powerful features.
 
 ---
 
@@ -212,7 +222,7 @@ python -m asynctasq worker
 
 ## CI & Contributing (short)
 
-- **CI runs on PRs and pushes to `main`** and includes lint, type checks and tests across Python 3.11–3.14.
+- **CI runs on PRs and pushes to `main`** and includes lint, type checks and tests across Python 3.12–3.14.
 - **Pre-commit hooks** enforce formatting and static checks locally before commits (see [`./setup-pre-commit.sh`](https://github.com/adamrefaey/asynctasq/blob/main/setup-pre-commit.sh)).
 - **Branch protection:** enable required status checks (CI success, lint, unit/integration jobs) for `main`.
 - **Coverage badge:** the repository updates `.github/coverage.svg` automatically via `.github/workflows/coverage-badge.yml`.
@@ -345,8 +355,32 @@ python -m asynctasq worker
 6. **Enterprise ACID guarantees** – PostgreSQL/MySQL drivers with transactional dequeue
 7. **Dead-letter queues** – Built-in support for failed task inspection
 8. **FastAPI integration** – First-class support with lifecycle management
-9. **Elegant, expressive API** – Method chaining and intuitive task definitions
-10. **Zero configuration** – Works with environment variables out of the box
+9. **Real-time event streaming** – Redis Pub/Sub for live monitoring dashboards
+10. **Optional monitoring UI** – Beautiful dashboard via [asynctasq-monitor](https://github.com/adamrefaey/asynctasq-monitor)
+11. **Elegant, expressive API** – Method chaining and intuitive task definitions
+12. **Zero configuration** – Works with environment variables out of the box
+
+---
+
+## 📊 Monitoring Dashboard
+
+### [asynctasq-monitor](https://github.com/adamrefaey/asynctasq-monitor)
+
+A beautiful **real-time monitoring dashboard** for Async TasQ:
+
+- 📈 **Live Dashboard** – Real-time task metrics, queue depths, and worker status
+- 📊 **Task Analytics** – Execution times, success/failure rates, retry patterns
+- 🔍 **Task Explorer** – Browse, search, and inspect task details
+- 👷 **Worker Management** – Monitor worker health and performance
+- 🚨 **Alerts** – Get notified about failures and queue backlogs
+
+```bash
+# Install the monitoring package
+uv add asynctasq-monitor
+
+# Start the monitoring server
+asynctasq-monitor web
+```
 
 ---
 
@@ -400,12 +434,10 @@ MIT License – see [LICENSE](https://github.com/adamrefaey/asynctasq/blob/main/
 - [ ] SQLite driver support
 - [ ] Oracle driver support
 - [ ] Task batching support
-- [ ] Task chaining and workflows
+- [ ] Task chaining and workflows (chains, chords, groups)
 - [ ] Rate limiting
 - [ ] Task priority within queues
-- [ ] Web UI for monitoring
-- [ ] Prometheus metrics exporter
-- [ ] Additional ORM support
+- [ ] Scheduled/cron tasks
 
 ---
 

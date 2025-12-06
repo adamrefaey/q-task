@@ -116,13 +116,16 @@ if __name__ == "__main__":
 
 **Worker Parameters:**
 
-| Parameter      | Type             | Description                                    |
-| -------------- | ---------------- | ---------------------------------------------- |
-| `queue_driver` | `BaseDriver`     | Queue driver instance                          |
-| `queues`       | `list[str]`      | Queue names to process (priority order)        |
-| `concurrency`  | `int`            | Maximum concurrent tasks                       |
-| `max_tasks`    | `int \| None`    | Process N tasks then exit (None = run forever) |
-| `serializer`   | `BaseSerializer` | Custom serializer (default: MsgpackSerializer) |
+| Parameter            | Type             | Default | Description                                    |
+| -------------------- | ---------------- | ------- | ---------------------------------------------- |
+| `queue_driver`       | `BaseDriver`     | -       | Queue driver instance                          |
+| `queues`             | `list[str]`      | `["default"]` | Queue names to process (priority order)  |
+| `concurrency`        | `int`            | `10`    | Maximum concurrent tasks                       |
+| `max_tasks`          | `int \| None`    | `None`  | Process N tasks then exit (None = run forever) |
+| `serializer`         | `BaseSerializer` | `MsgpackSerializer` | Custom serializer            |
+| `event_emitter`      | `EventEmitter`   | `None`  | Event emitter for real-time monitoring         |
+| `worker_id`          | `str \| None`    | auto    | Custom worker identifier (auto-generated if None) |
+| `heartbeat_interval` | `float`          | `60.0`  | Seconds between heartbeat events               |
 
 **Worker Behavior:**
 
@@ -169,6 +172,65 @@ python -m asynctasq worker --queues low-priority,batch --concurrency 5
 - Prevent slow tasks from blocking fast tasks
 - Scale different queues independently
 - Dedicate resources based on queue importance
+
+---
+
+## Event Streaming
+
+Workers can emit real-time events for monitoring via Redis Pub/Sub. This enables live dashboards and metrics.
+
+**Event Types:**
+
+| Event              | Description                                |
+| ------------------ | ------------------------------------------ |
+| `task_enqueued`    | Task added to queue                        |
+| `task_started`     | Worker began executing task                |
+| `task_completed`   | Task finished successfully                 |
+| `task_failed`      | Task failed after all retries              |
+| `task_retrying`    | Task failed, will retry                    |
+| `worker_online`    | Worker started                             |
+| `worker_heartbeat` | Periodic worker status (every 60s default) |
+| `worker_offline`   | Worker shutting down                       |
+
+**Enable Event Streaming:**
+
+```python
+from asynctasq.core.events import create_event_emitter
+from asynctasq.core.worker import Worker
+
+# Create event emitter (uses Redis Pub/Sub)
+emitter = create_event_emitter(redis_url="redis://localhost:6379")
+
+# Create worker with events
+worker = Worker(
+    queue_driver=driver,
+    queues=['default'],
+    event_emitter=emitter,
+    worker_id="worker-1",       # Custom ID for identification
+    heartbeat_interval=60.0     # Heartbeat every 60 seconds
+)
+await worker.start()
+```
+
+**Configure via Environment:**
+
+```bash
+export asynctasq_EVENTS_REDIS_URL=redis://localhost:6379
+export asynctasq_EVENTS_CHANNEL=asynctasq:events
+```
+
+**Consume Events:**
+
+```python
+from asynctasq.core.events import EventSubscriber
+
+async def monitor_events():
+    subscriber = EventSubscriber(redis_url="redis://localhost:6379")
+    await subscriber.connect()
+    
+    async for event in subscriber.listen():
+        print(f"Event: {event.event_type} - Task: {event.task_id}")
+```
 
 ---
 

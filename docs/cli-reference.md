@@ -18,12 +18,17 @@ python -m asynctasq worker [OPTIONS]
 | `--redis-url URL`               | Redis connection URL                         | `redis://localhost:6379` |
 | `--redis-password PASSWORD`     | Redis password                               | `None`                   |
 | `--redis-db N`                  | Redis database number (0-15)                 | `0`                      |
+| `--redis-max-connections N`     | Redis connection pool size                   | `10`                     |
 | `--postgres-dsn DSN`            | PostgreSQL connection DSN                    | -                        |
 | `--postgres-queue-table TABLE`  | PostgreSQL queue table name                  | `task_queue`             |
+| `--postgres-dead-letter-table TABLE` | PostgreSQL dead letter table name       | `dead_letter_queue`      |
 | `--mysql-dsn DSN`               | MySQL connection DSN                         | -                        |
 | `--mysql-queue-table TABLE`     | MySQL queue table name                       | `task_queue`             |
+| `--mysql-dead-letter-table TABLE` | MySQL dead letter table name               | `dead_letter_queue`      |
 | `--sqs-region REGION`           | AWS SQS region                               | `us-east-1`              |
 | `--sqs-queue-url-prefix PREFIX` | SQS queue URL prefix                         | -                        |
+| `--aws-access-key-id KEY`       | AWS access key (optional)                    | -                        |
+| `--aws-secret-access-key KEY`   | AWS secret key (optional)                    | -                        |
 
 **Examples:**
 

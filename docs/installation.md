@@ -1,5 +1,9 @@
 # Installation
 
+## Requirements
+
+- **Python 3.12+** (required)
+
 ## Using uv (Recommended)
 
 [uv](https://github.com/astral-sh/uv) is a fast Python package installer and resolver.
@@ -22,6 +26,9 @@ uv add "asynctasq[tortoise]"   # Tortoise ORM
 
 # With framework integrations
 uv add "asynctasq[fastapi]"    # FastAPI integration
+
+# With monitoring support (real-time events)
+uv add "asynctasq[monitor]"    # Redis Pub/Sub for events
 
 # Complete installation with all features
 uv add "asynctasq[all]"
@@ -47,6 +54,9 @@ pip install "asynctasq[tortoise]"
 
 # With framework integrations
 pip install "asynctasq[fastapi]"
+
+# With monitoring support
+pip install "asynctasq[monitor]"
 
 # Complete installation
 pip install "asynctasq[all]"
