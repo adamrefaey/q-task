@@ -689,7 +689,7 @@ Async TasQ supports both async and synchronous class-based tasks. The framework 
 | Async libraries available             | **Task**     | Native async support                  |
 | Only sync libraries available         | **SyncTask** | Works with any blocking library       |
 
-### Async TasQ (Recommended)
+### Task (Recommended)
 
 Use `Task` for I/O-bound operations (API calls, database queries, file operations):
 
