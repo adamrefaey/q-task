@@ -1,99 +1,178 @@
-from datetime import date, datetime
-from decimal import Decimal
+"""Msgpack serializer with hook-based type handling.
+
+This module provides the main serializer implementation using msgpack
+with a pluggable hook system for custom type support.
+"""
+
 from typing import Any, cast
-from uuid import UUID
 
 from msgpack import packb, unpackb
 
 from .base_serializer import BaseSerializer
-from .orm_handler import OrmHandler
+from .hooks import HookRegistry, SerializationPipeline, TypeHook, create_default_registry
+from .orm_hooks import register_orm_hooks
+
+
+def create_full_registry() -> HookRegistry:
+    """Create a registry with all built-in hooks including ORM support.
+
+    Returns:
+        HookRegistry with datetime, date, Decimal, UUID, set, and ORM hooks
+    """
+    registry = create_default_registry()
+    register_orm_hooks(registry)
+    return registry
 
 
 class MsgpackSerializer(BaseSerializer):
-    """Msgpack-based serializer for task data with smart model handling.
+    """Msgpack-based serializer with pluggable hook system.
 
     Features:
-    - ORM models serialized as lightweight references (class + PK)
-    - Custom type encoding (datetime, Decimal, UUID, sets)
-    - Native msgpack handling for bytes (use_bin_type=True)
+    - Pluggable hook system for custom type serialization
+    - Built-in support for datetime, date, Decimal, UUID, set
+    - ORM model support (SQLAlchemy, Django, Tortoise)
     - Recursive processing of nested structures
+    - User-defined hook registration
+
+    Example:
+        >>> from asynctasq.serializers import MsgpackSerializer
+        >>> from asynctasq.serializers.hooks import TypeHook
+        >>>
+        >>> class MoneyHook(TypeHook[Money]):
+        ...     type_key = "__money__"
+        ...
+        ...     def can_encode(self, obj: Any) -> bool:
+        ...         return isinstance(obj, Money)
+        ...
+        ...     def encode(self, obj: Money) -> dict[str, Any]:
+        ...         return {self.type_key: {"amount": str(obj.amount), "currency": obj.currency}}
+        ...
+        ...     def decode(self, data: dict[str, Any]) -> Money:
+        ...         d = data[self.type_key]
+        ...         return Money(Decimal(d["amount"]), d["currency"])
+        >>>
+        >>> serializer = MsgpackSerializer()
+        >>> serializer.register_hook(MoneyHook())
     """
 
-    def __init__(self) -> None:
-        """Initialize serializer with ORM handler."""
-        self.orm_handler = OrmHandler()
+    def __init__(self, registry: HookRegistry | None = None) -> None:
+        """Initialize serializer with optional custom registry.
+
+        Args:
+            registry: Custom hook registry. If None, uses default with all built-in hooks.
+        """
+        self._registry = registry or create_full_registry()
+        self._pipeline = SerializationPipeline(self._registry)
+
+    @property
+    def registry(self) -> HookRegistry:
+        """Access the hook registry for registration/inspection."""
+        return self._registry
+
+    @property
+    def pipeline(self) -> SerializationPipeline:
+        """Access the serialization pipeline."""
+        return self._pipeline
+
+    def register_hook(self, hook: TypeHook[Any]) -> None:
+        """Register a custom type hook.
+
+        Convenience method for self.registry.register(hook).
+
+        Args:
+            hook: TypeHook instance to register
+
+        Raises:
+            ValueError: If hook with same type_key already exists
+        """
+        self._registry.register(hook)
+
+    def unregister_hook(self, type_key: str) -> TypeHook[Any] | None:
+        """Unregister a hook by its type_key.
+
+        Args:
+            type_key: The type_key of the hook to remove
+
+        Returns:
+            The removed hook, or None if not found
+        """
+        return self._registry.unregister(type_key)
 
     def serialize(self, obj: dict[str, Any]) -> bytes:
         """Serialize task data dict to msgpack bytes.
 
-        ORM models are automatically detected and converted to references
-        via the _encode_custom_types hook.
+        Custom types are automatically detected and converted via hooks.
+
+        Args:
+            obj: Task data dictionary to serialize
+
+        Returns:
+            Msgpack-encoded bytes
         """
-        return cast(bytes, packb(obj, default=self._encode_custom_types, use_bin_type=True))
+        return cast(
+            bytes,
+            packb(obj, default=self._encode_with_hooks, use_bin_type=True),
+        )
 
     async def deserialize(self, data: bytes) -> dict[str, Any]:
         """Deserialize msgpack bytes back to task data dict.
 
-        Automatically fetches ORM models from database during deserialization.
+        Automatically restores custom types including async ORM model fetching.
+
+        Args:
+            data: Msgpack-encoded bytes
+
+        Returns:
+            Task data dictionary with all types restored
         """
-        # First, deserialize to get structure with ORM references
+        # First pass: msgpack unpack with sync type decoding
         result = cast(
-            dict[str, Any], unpackb(data, object_hook=self._decode_custom_types, raw=False)
+            dict[str, Any],
+            unpackb(data, object_hook=self._decode_with_hooks, raw=False),
         )
 
-        # Then process to fetch ORM models
+        # Second pass: async processing for ORM models and other async hooks
         if "params" in result:
-            result["params"] = await self.orm_handler.process_for_deserialization(result["params"])
+            result["params"] = await self._pipeline.decode_async(result["params"])
 
         return result
 
-    def _encode_custom_types(self, obj: Any) -> Any:
-        """Encode Python types that msgpack doesn't support natively.
+    def _encode_with_hooks(self, obj: Any) -> Any:
+        """Msgpack default encoder using hook system.
 
-        Handles:
-        - datetime, date, Decimal, UUID, set (built-in types)
-        - ORM models (converted to lightweight references)
+        Called by msgpack for types it can't handle natively.
+
+        Args:
+            obj: Object to encode
+
+        Returns:
+            Encoded representation
+
+        Raises:
+            TypeError: If no hook can handle the object
         """
-        # Handle built-in custom types
-        if isinstance(obj, datetime):
-            return {"__datetime__": obj.isoformat()}
-        elif isinstance(obj, date):
-            return {"__date__": obj.isoformat()}
-        elif isinstance(obj, Decimal):
-            return {"__decimal__": str(obj)}
-        elif isinstance(obj, UUID):
-            return {"__uuid__": str(obj)}
-        elif isinstance(obj, set):
-            return {"__set__": list(obj)}
-
-        # Handle ORM models - convert to reference
-        if self.orm_handler.is_orm_model(obj):
-            return self.orm_handler.serialize_model(obj)
+        # Try to find an encoder hook
+        hook = self._registry.find_encoder(obj)
+        if hook is not None:
+            return hook.encode(obj)
 
         raise TypeError(f"Object of type {type(obj)} is not msgpack serializable")
 
-    def _decode_custom_types(self, obj: Any) -> Any:
-        """Decode custom Python types from msgpack.
+    def _decode_with_hooks(self, obj: Any) -> Any:
+        """Msgpack object_hook decoder using hook system.
 
-        Handles:
-        - datetime, date, Decimal, UUID, set (built-in types)
-        - ORM references (detected and passed through for async fetching in deserialize)
+        Called by msgpack for each dictionary during unpacking.
+
+        Args:
+            obj: Object to decode
+
+        Returns:
+            Decoded object (sync types restored, async types passed through)
         """
         if isinstance(obj, dict):
-            # Handle built-in custom types
-            if "__datetime__" in obj:
-                return datetime.fromisoformat(obj["__datetime__"])
-            elif "__date__" in obj:
-                return date.fromisoformat(obj["__date__"])
-            elif "__decimal__" in obj:
-                return Decimal(obj["__decimal__"])
-            elif "__uuid__" in obj:
-                return UUID(obj["__uuid__"])
-            elif "__set__" in obj:
-                return set(obj["__set__"])
-
-            # Detect ORM references - pass through for async fetching in deserialize()
-            if self.orm_handler._is_orm_reference(obj):
-                return obj
+            # Try to find a decoder hook
+            hook = self._registry.find_decoder(obj)
+            if hook is not None:
+                return hook.decode(obj)
 
         return obj
