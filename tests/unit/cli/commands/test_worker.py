@@ -8,7 +8,7 @@ Testing Strategy:
 """
 
 import argparse
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 from pytest import main, mark
 
@@ -47,6 +47,7 @@ class TestRunWorker:
             queue_driver=mock_driver,
             queues=["default"],
             concurrency=10,
+            event_emitter=ANY,
         )
         mock_worker.start.assert_awaited_once()
         mock_logger.info.assert_called_once()
@@ -77,6 +78,7 @@ class TestRunWorker:
             queue_driver=mock_driver,
             queues=["high", "low"],
             concurrency=20,
+            event_emitter=ANY,
         )
 
     @patch("asynctasq.cli.commands.worker.Worker")

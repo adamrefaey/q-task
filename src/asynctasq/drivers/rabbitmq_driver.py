@@ -14,7 +14,7 @@ from aio_pika.abc import (
 from aio_pika.exceptions import AMQPConnectionError as AioPikaConnectionError
 import aiormq.exceptions as _aiormq_excs
 
-from asynctasq.core.models import QueueStats, TaskInfo, WorkerInfo
+from asynctasq.core.models import QueueStats, WorkerInfo
 
 from .base_driver import BaseDriver
 
@@ -715,7 +715,7 @@ class RabbitMQDriver(BaseDriver):
                 "total": 0,
             }
 
-    async def get_running_tasks(self, limit: int = 50, offset: int = 0) -> list[TaskInfo]:
+    async def get_running_tasks(self, limit: int = 50, offset: int = 0) -> list[tuple[bytes, str]]:
         """Get currently running tasks with pagination.
 
         Args:
@@ -723,7 +723,7 @@ class RabbitMQDriver(BaseDriver):
             offset: Pagination offset
 
         Returns:
-            List of TaskInfo objects with status="running"
+            List of (payload_bytes, queue_name) tuples
 
         Implementation:
             - AMQP doesn't expose running task metadata
@@ -737,25 +737,19 @@ class RabbitMQDriver(BaseDriver):
         self,
         status: str | None = None,
         queue: str | None = None,
-        worker_id: str | None = None,
         limit: int = 50,
         offset: int = 0,
-        order_by: str = "enqueued_at",
-        order_direction: str = "desc",
-    ) -> tuple[list[TaskInfo], int]:
+    ) -> tuple[list[tuple[bytes, str, str]], int]:
         """Get tasks with filtering and pagination.
 
         Args:
             status: Filter by status (pending, running, completed, failed)
             queue: Filter by queue name
-            worker_id: Filter by worker ID
             limit: Maximum tasks to return
             offset: Pagination offset
-            order_by: Field to sort by (enqueued_at, started_at, duration_ms)
-            order_direction: 'asc' or 'desc'
 
         Returns:
-            Tuple of (tasks, total_count) for pagination
+            Tuple of (list of (payload_bytes, queue_name, status), total_count)
 
         Implementation:
             - AMQP doesn't track task metadata (IDs, status, timestamps)
@@ -765,14 +759,14 @@ class RabbitMQDriver(BaseDriver):
         # Would require external storage (Redis/DB) to track task history
         return [], 0
 
-    async def get_task_by_id(self, task_id: str) -> TaskInfo | None:
-        """Get detailed task information by ID.
+    async def get_task_by_id(self, task_id: str) -> bytes | None:
+        """Get raw task payload by ID.
 
         Args:
             task_id: Task UUID
 
         Returns:
-            TaskInfo object or None if not found
+            Raw payload bytes or None if not found
 
         Implementation:
             - AMQP doesn't track task IDs or metadata

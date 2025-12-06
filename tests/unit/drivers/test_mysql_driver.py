@@ -289,22 +289,23 @@ class TestMySQLDriverStatsAndManagement:
         mock_cursor_context.__aexit__ = AsyncMock(return_value=None)
         mock_conn.cursor = MagicMock(return_value=mock_cursor_context)
 
-        # rows for get_tasks then count
-        created = None
+        # rows for get_tasks (now returns payload, queue_name, status)
         mock_cursor.fetchall.side_effect = [
-            [(1, "q", "pending", 0, 3, created, created)],
+            [(b"task_data", "q", "pending")],
         ]
-        mock_cursor.fetchone.side_effect = [(1,), (1, "q", "pending", 0, 3, created, created)]
+        mock_cursor.fetchone.side_effect = [(1,), (b"task_by_id_data",)]
 
         driver.pool = mock_pool
         tasks, total = await driver.get_tasks(status="pending", queue="q", limit=1, offset=0)
         assert total == 1
         assert len(tasks) == 1
+        # Now returns list of (bytes, queue_name, status) tuples
+        assert tasks[0] == (b"task_data", "q", "pending")
 
-        # get_task_by_id
-        mock_cursor.fetchone.side_effect = [(1, "q", "pending", 0, 3, created, created)]
+        # get_task_by_id (now returns just payload bytes)
         t = await driver.get_task_by_id("1")
         assert t is not None
+        assert t == b"task_by_id_data"
 
     @mark.asyncio
     async def test_retry_and_delete_task(self) -> None:

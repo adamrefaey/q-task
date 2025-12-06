@@ -1,11 +1,10 @@
 import asyncio
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
 from uuid import uuid4
 
 from asyncmy import Pool, create_pool
 
-from asynctasq.core.models import QueueStats, TaskInfo, WorkerInfo
+from asynctasq.core.models import QueueStats, WorkerInfo
 
 from .base_driver import BaseDriver
 
@@ -510,64 +509,35 @@ class MySQLDriver(BaseDriver):
             "total": int(total),
         }
 
-    async def get_running_tasks(self, limit: int = 50, offset: int = 0) -> list[TaskInfo]:
-        """Return list of tasks currently processing."""
+    async def get_running_tasks(self, limit: int = 50, offset: int = 0) -> list[tuple[bytes, str]]:
+        """Return list of tasks currently processing as raw payloads."""
         if self.pool is None:
             await self.connect()
             assert self.pool is not None
 
-        q = f"SELECT id, queue_name, attempts, max_attempts, created_at, updated_at FROM {self.queue_table} WHERE status='processing' ORDER BY updated_at DESC LIMIT %s OFFSET %s"
+        q = f"SELECT payload, queue_name FROM {self.queue_table} WHERE status='processing' ORDER BY updated_at DESC LIMIT %s OFFSET %s"
         async with self.pool.acquire() as conn:
             async with conn.cursor() as cursor:
                 await cursor.execute(q, (limit, offset))
                 rows = await cursor.fetchall()
 
-        tasks: list[TaskInfo] = []
-        for row in rows or []:
-            id_, queue_name, attempts, max_attempts, created_at, updated_at = row
-            if isinstance(created_at, datetime):
-                enqueued_at = created_at
-            elif created_at is None:
-                enqueued_at = datetime.now(UTC)
-            else:
-                enqueued_at = datetime.fromtimestamp(created_at)
-
-            started_at = updated_at if isinstance(updated_at, datetime) else None
-
-            tasks.append(
-                TaskInfo(
-                    id=str(id_),
-                    name="",
-                    queue=queue_name,
-                    status="processing",
-                    enqueued_at=enqueued_at,
-                    started_at=started_at,
-                    attempt=int(attempts) if attempts is not None else 1,
-                    max_retries=int(max_attempts)
-                    if max_attempts is not None
-                    else self.max_attempts,
-                )
-            )
-        return tasks
+        return [(bytes(row[0]), row[1]) for row in rows or []]
 
     async def get_tasks(
         self,
         status: str | None = None,
         queue: str | None = None,
-        worker_id: str | None = None,
         limit: int = 50,
         offset: int = 0,
-        order_by: str = "enqueued_at",
-        order_direction: str = "desc",
-    ) -> tuple[list[TaskInfo], int]:
-        """Return list of tasks with pagination and total count."""
+    ) -> tuple[list[tuple[bytes, str, str]], int]:
+        """Return list of tasks with pagination and total count.
+
+        Returns:
+            Tuple of (list of (payload_bytes, queue_name, status), total_count)
+        """
         if self.pool is None:
             await self.connect()
             assert self.pool is not None
-
-        # Map order_by to DB column
-        col = "created_at" if order_by == "enqueued_at" else order_by
-        order_direction = "ASC" if order_direction.lower() == "asc" else "DESC"
 
         conditions = []
         params: list = []
@@ -580,7 +550,7 @@ class MySQLDriver(BaseDriver):
 
         where = " AND ".join(conditions) if conditions else "1=1"
 
-        q = f"SELECT id, queue_name, status, attempts, max_attempts, created_at, updated_at FROM {self.queue_table} WHERE {where} ORDER BY {col} {order_direction} LIMIT %s OFFSET %s"
+        q = f"SELECT payload, queue_name, status FROM {self.queue_table} WHERE {where} ORDER BY created_at DESC LIMIT %s OFFSET %s"
         count_q = f"SELECT COUNT(*) FROM {self.queue_table} WHERE {where}"
 
         async with self.pool.acquire() as conn:
@@ -590,69 +560,32 @@ class MySQLDriver(BaseDriver):
                 await cursor.execute(count_q, tuple(params))
                 total = (await cursor.fetchone())[0]
 
-        tasks: list[TaskInfo] = []
+        tasks: list[tuple[bytes, str, str]] = []
         for row in rows or []:
-            id_, queue_name, status_, attempts, max_attempts, created_at, updated_at = row
-            if isinstance(created_at, datetime):
-                enqueued_at = created_at
-            elif created_at is None:
-                enqueued_at = datetime.now(UTC)
-            else:
-                enqueued_at = datetime.fromtimestamp(created_at)
-
-            started_at = updated_at if isinstance(updated_at, datetime) else None
-
-            tasks.append(
-                TaskInfo(
-                    id=str(id_),
-                    name="",
-                    queue=queue_name,
-                    status=status_,
-                    enqueued_at=enqueued_at,
-                    started_at=started_at,
-                    attempt=int(attempts) if attempts is not None else 1,
-                    max_retries=int(max_attempts)
-                    if max_attempts is not None
-                    else self.max_attempts,
-                )
-            )
+            payload, queue_name, status_ = row
+            tasks.append((bytes(payload), queue_name, status_))
 
         return tasks, int(total)
 
-    async def get_task_by_id(self, task_id: str) -> TaskInfo | None:
-        """Return a single task by id (searches queue table)."""
+    async def get_task_by_id(self, task_id: str) -> bytes | None:
+        """Return raw task payload by id (searches queue table).
+
+        Returns:
+            Raw payload bytes or None if not found
+        """
         if self.pool is None:
             await self.connect()
             assert self.pool is not None
 
-        q = f"SELECT id, queue_name, status, attempts, max_attempts, created_at, updated_at FROM {self.queue_table} WHERE id = %s"
+        q = f"SELECT payload FROM {self.queue_table} WHERE id = %s"
         async with self.pool.acquire() as conn:
             async with conn.cursor() as cursor:
                 await cursor.execute(q, (task_id,))
                 row = await cursor.fetchone()
                 if not row:
                     return None
-                id_, queue_name, status_, attempts, max_attempts, created_at, updated_at = row
 
-        if isinstance(created_at, datetime):
-            enqueued_at = created_at
-        elif created_at is None:
-            enqueued_at = datetime.now(UTC)
-        else:
-            enqueued_at = datetime.fromtimestamp(created_at)
-
-        started_at = updated_at if isinstance(updated_at, datetime) else None
-
-        return TaskInfo(
-            id=str(id_),
-            name="",
-            queue=queue_name,
-            status=status_,
-            enqueued_at=enqueued_at,
-            started_at=started_at,
-            attempt=int(attempts) if attempts is not None else 1,
-            max_retries=int(max_attempts) if max_attempts is not None else self.max_attempts,
-        )
+        return bytes(row[0])
 
     async def retry_task(self, task_id: str) -> bool:
         """Retry a failed task from dead-letter table by moving it back to the queue.

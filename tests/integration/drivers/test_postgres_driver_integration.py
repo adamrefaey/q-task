@@ -1491,23 +1491,22 @@ class TestPostgresDriverWithRealPostgres:
         task_id = postgres_driver._receipt_handles.get(receipt)
         assert task_id is not None
 
-        # Act - running tasks
+        # Act - running tasks (returns list of (bytes, queue_name) tuples)
         running = await postgres_driver.get_running_tasks(limit=10)
-        assert any(t.queue == "default" and t.status == "processing" for t in running)
+        assert any(t[1] == "default" for t in running)
 
-        # Act - filtered tasks
+        # Act - filtered tasks (returns list of (bytes, queue_name, status) tuples)
         tasks, total = await postgres_driver.get_tasks(
             status="processing", queue="default", limit=10, offset=0
         )
         assert total >= 1
         assert len(tasks) >= 1
 
-        # Act - get_task_by_id
-        sample = tasks[0]
-        # `sample.id` is a string representation of the DB serial id; convert to int
-        fetched = await postgres_driver.get_task_by_id(sample.id)
+        # Act - get_task_by_id using task_id from receipt_handles
+        fetched = await postgres_driver.get_task_by_id(str(task_id))
         assert fetched is not None
-        assert fetched.id == sample.id
+        # fetched is now raw bytes
+        assert isinstance(fetched, bytes)
 
         # Cleanup
         await postgres_driver.ack("default", receipt)

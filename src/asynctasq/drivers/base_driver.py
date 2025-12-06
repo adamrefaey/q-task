@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 
-from asynctasq.core.models import QueueStats, TaskInfo, WorkerInfo
+from asynctasq.core.models import QueueStats, WorkerInfo
 
 
 class BaseDriver(ABC):
@@ -199,7 +199,7 @@ class BaseDriver(ABC):
         pass
 
     @abstractmethod
-    async def get_running_tasks(self, limit: int = 50, offset: int = 0) -> list[TaskInfo]:
+    async def get_running_tasks(self, limit: int = 50, offset: int = 0) -> list[tuple[bytes, str]]:
         """
         Get currently running tasks with pagination.
 
@@ -208,12 +208,11 @@ class BaseDriver(ABC):
             offset: Pagination offset
 
         Returns:
-            List of TaskInfo objects with status="running"
+            List of (raw_bytes, queue_name) tuples for running tasks
 
         Implementation Notes:
             - Order by started_at DESC (newest first)
-            - Include worker_id for each task
-            - Redis: Query processing sorted set
+            - Redis: Query processing lists
             - PostgreSQL/MySQL: WHERE status='running' ORDER BY started_at DESC
             - RabbitMQ: Track in separate Redis/DB (AMQP doesn't expose running tasks)
             - SQS: Similar to RabbitMQ (use visibility timeout tracking)
@@ -225,49 +224,44 @@ class BaseDriver(ABC):
         self,
         status: str | None = None,
         queue: str | None = None,
-        worker_id: str | None = None,
         limit: int = 50,
         offset: int = 0,
-        order_by: str = "enqueued_at",
-        order_direction: str = "desc",
-    ) -> tuple[list[TaskInfo], int]:
+    ) -> tuple[list[tuple[bytes, str, str]], int]:
         """
-        Get tasks with filtering and pagination.
+        Get raw serialized task data with queue name and status.
+
+        Returns raw bytes as stored in the queue, along with queue name
+        and inferred status. Callers are responsible for deserialization.
 
         Args:
-            status: Filter by status (pending, running, completed, failed)
+            status: Filter by status (pending, running)
             queue: Filter by queue name
-            worker_id: Filter by worker ID
             limit: Maximum tasks to return
             offset: Pagination offset
-            order_by: Field to sort by (enqueued_at, started_at, duration_ms)
-            order_direction: 'asc' or 'desc'
 
         Returns:
-            Tuple of (tasks, total_count) for pagination
+            Tuple of (list of (raw_bytes, queue_name, status), total_count)
 
-        Implementation Notes:
-            - Use indexes on status, queue, enqueued_at for performance
-            - Return lightweight TaskInfo objects (not full task data)
-            - Limit to last 7 days for performance
+        Note:
+            The raw bytes are msgpack-serialized task dicts. Consumers
+            should use a serializer to deserialize them.
         """
         pass
 
     @abstractmethod
-    async def get_task_by_id(self, task_id: str) -> TaskInfo | None:
+    async def get_task_by_id(self, task_id: str) -> bytes | None:
         """
-        Get detailed task information by ID.
+        Get raw serialized task data by ID.
 
         Args:
             task_id: Task UUID
 
         Returns:
-            TaskInfo object or None if not found
+            Raw msgpack bytes or None if not found
 
         Implementation Notes:
-            - Include full traceback if failed
-            - Include result data if completed
             - Use primary key lookup (fast)
+            - Caller is responsible for deserialization
         """
         pass
 

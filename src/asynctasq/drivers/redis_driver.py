@@ -6,7 +6,7 @@ from typing import Any
 
 from redis.asyncio import Redis
 
-from asynctasq.core.models import QueueStats, TaskInfo, WorkerInfo
+from asynctasq.core.models import QueueStats, WorkerInfo
 
 from .base_driver import BaseDriver
 
@@ -355,40 +355,25 @@ class RedisDriver(BaseDriver):
             "total": total,
         }
 
-    async def get_running_tasks(self, limit: int = 50, offset: int = 0) -> list[TaskInfo]:
-        """Return tasks currently in processing lists.
+    async def get_running_tasks(self, limit: int = 50, offset: int = 0) -> list[tuple[bytes, str]]:
+        """Return raw task bytes for tasks currently in processing lists.
 
-        This reads from all `queue:*:processing` lists and returns TaskInfo stubs.
+        Returns:
+            List of (raw_bytes, queue_name) tuples for running tasks
         """
-        # TaskInfo and datetime imported at module level for ruff/formatting
-
         if self.client is None:
             await self.connect()
             assert self.client is not None
 
         queues = await self.get_all_queue_names()
-        running: list[TaskInfo] = []
+        running: list[tuple[bytes, str]] = []
 
         for q in queues:
             processing_key = f"queue:{q}:processing"
             items = await maybe_await(self.client.lrange(processing_key, 0, -1))
             for raw in items:
-                # best-effort: decode bytes -> string for id placeholder
-                task_id = (
-                    raw[:36].decode()
-                    if isinstance(raw, (bytes, bytearray)) and len(raw) >= 36
-                    else None
-                )
-                ti = TaskInfo(
-                    id=task_id or "",
-                    name="",
-                    queue=q,
-                    status="running",
-                    enqueued_at=datetime.now(UTC),
-                    started_at=datetime.now(UTC),
-                    worker_id=None,
-                )
-                running.append(ti)
+                if isinstance(raw, (bytes, bytearray)):
+                    running.append((bytes(raw), q))
 
         # Apply pagination
         return running[offset : offset + limit]
@@ -397,82 +382,47 @@ class RedisDriver(BaseDriver):
         self,
         status: str | None = None,
         queue: str | None = None,
-        worker_id: str | None = None,
         limit: int = 50,
         offset: int = 0,
-        order_by: str = "enqueued_at",
-        order_direction: str = "desc",
-    ) -> tuple[list["TaskInfo"], int]:
-        """Return tasks with optional filtering.
+    ) -> tuple[list[tuple[bytes, str, str]], int]:
+        """Return raw serialized task bytes with queue and status metadata.
 
-        This driver does not store a full task history by default; therefore this
-        method provides a best-effort by scanning simple keys. For real deployments
-        users should enable task-history storage.
+        Returns raw msgpack bytes as stored in Redis, allowing the caller
+        to deserialize using the appropriate serializer.
         """
-
-        # TaskInfo and datetime imported at module level
-
         if self.client is None:
             await self.connect()
             assert self.client is not None
 
         queues = [queue] if queue else await self.get_all_queue_names()
-        results: list[TaskInfo] = []
+        results: list[tuple[bytes, str, str]] = []
 
         for q in queues:
-            # pending
+            # pending tasks
             if status is None or status == "pending":
                 pending_items = await maybe_await(self.client.lrange(f"queue:{q}", 0, -1))
                 for raw in pending_items:
-                    results.append(
-                        TaskInfo(
-                            id=(
-                                raw[:36].decode()
-                                if isinstance(raw, (bytes, bytearray)) and len(raw) >= 36
-                                else ""
-                            ),
-                            name="",
-                            queue=q,
-                            status="pending",
-                            enqueued_at=datetime.now(UTC),
-                        )
-                    )
+                    if isinstance(raw, (bytes, bytearray)):
+                        results.append((bytes(raw), q, "pending"))
 
-            # running
+            # running tasks
             if status is None or status == "running":
                 processing_items = await maybe_await(
                     self.client.lrange(f"queue:{q}:processing", 0, -1)
                 )
                 for raw in processing_items:
-                    results.append(
-                        TaskInfo(
-                            id=(
-                                raw[:36].decode()
-                                if isinstance(raw, (bytes, bytearray)) and len(raw) >= 36
-                                else ""
-                            ),
-                            name="",
-                            queue=q,
-                            status="running",
-                            enqueued_at=datetime.now(UTC),
-                        )
-                    )
+                    if isinstance(raw, (bytes, bytearray)):
+                        results.append((bytes(raw), q, "running"))
 
         total = len(results)
-
-        # Simple ordering: we don't have timestamps per-item here, so keep natural order
-        if order_direction == "desc":
-            results = list(reversed(results))
-
         paged = results[offset : offset + limit]
         return paged, total
 
-    async def get_task_by_id(self, task_id: str) -> TaskInfo | None:
+    async def get_task_by_id(self, task_id: str) -> bytes | None:
         """Best-effort lookup by scanning pending and processing lists for matching id.
 
-        Returns TaskInfo or None if not found.
+        Returns raw msgpack bytes or None if not found.
         """
-        # TaskInfo and datetime imported at module level
         if self.client is None:
             await self.connect()
             assert self.client is not None
@@ -480,19 +430,20 @@ class RedisDriver(BaseDriver):
         queues = await self.get_all_queue_names()
 
         for q in queues:
-            for key_suffix, status in (("", "pending"), (":processing", "running")):
+            for key_suffix in ("", ":processing"):
                 items = await maybe_await(self.client.lrange(f"queue:{q}{key_suffix}", 0, -1))
                 for raw in items:
                     if isinstance(raw, (bytes, bytearray)):
-                        raw_id = raw[:36].decode() if len(raw) >= 36 else None
-                        if raw_id == task_id:
-                            return TaskInfo(
-                                id=task_id,
-                                name="",
-                                queue=q,
-                                status=status,
-                                enqueued_at=datetime.now(UTC),
-                            )
+                        # We need to deserialize to check task_id, but return raw bytes
+                        # For now, scan by deserializing temporarily
+                        try:
+                            from msgpack import unpackb
+
+                            task_dict = unpackb(raw, raw=False)
+                            if task_dict.get("task_id") == task_id:
+                                return bytes(raw)
+                        except Exception:
+                            continue
 
         return None
 

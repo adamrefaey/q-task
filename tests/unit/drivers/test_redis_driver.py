@@ -991,7 +991,8 @@ class TestRedisDriverInspectionAndManagement:
         # Assert - pagination limits returned items
         assert isinstance(running, list)
         assert len(running) == 1
-        assert running[0].queue == "default"
+        # Now returns (bytes, str) tuples
+        assert running[0][1] == "default"
 
     @patch("asynctasq.drivers.redis_driver.Redis")
     @mark.asyncio
@@ -1029,17 +1030,20 @@ class TestRedisDriverInspectionAndManagement:
         driver = RedisDriver()
         await driver.connect()
         driver.get_all_queue_names = AsyncMock(return_value=["q"])
-        # pending contains an item starting with id
-        # Use 36-char id so driver's slicing picks it up
+        # Create a properly msgpack-serialized task
+        import msgpack
+
         task_id = "t" * 36
-        mock_client.lrange = AsyncMock(return_value=[(task_id + "-rest").encode()])
+        task_data = {"task_id": task_id, "task_name": "test_task"}
+        raw = msgpack.packb(task_data)
+        mock_client.lrange = AsyncMock(return_value=[raw])
 
         # Act
         ti = await driver.get_task_by_id(task_id)
 
-        # Assert
+        # Assert - now returns raw msgpack bytes
         assert ti is not None
-        assert ti.id == task_id
+        assert ti == raw
 
     @patch("asynctasq.drivers.redis_driver.Redis")
     @mark.asyncio

@@ -219,8 +219,13 @@ def get_dispatcher(driver: str | BaseDriver | None = None) -> Dispatcher:
     else:
         driver_instance = driver
 
-    # Create dispatcher
-    dispatcher = Dispatcher(driver_instance)
+    # Create event emitter for monitoring integration
+    from .events import create_event_emitter
+
+    event_emitter = create_event_emitter()
+
+    # Create dispatcher with event emitter
+    dispatcher = Dispatcher(driver_instance, event_emitter=event_emitter)
     _dispatchers[driver_key] = (dispatcher, driver_instance)
 
     logger.debug(f"Created dispatcher for driver: {driver_key}")
@@ -238,8 +243,12 @@ async def cleanup():
 
     logger.info(f"Cleaning up {len(_dispatchers)} dispatcher(s)")
 
-    for driver_key, (_dispatcher, driver) in _dispatchers.items():
+    for driver_key, (dispatcher, driver) in _dispatchers.items():
         try:
+            # Close event emitter if present
+            event_emitter = getattr(dispatcher, "event_emitter", None)
+            if event_emitter:
+                await event_emitter.close()
             await driver.disconnect()
             logger.debug(f"Successfully cleaned up dispatcher: {driver_key}")
         except Exception as e:

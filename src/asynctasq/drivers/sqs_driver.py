@@ -7,7 +7,7 @@ from aioboto3 import Session
 from types_aiobotocore_sqs import SQSClient
 from types_aiobotocore_sqs.literals import QueueAttributeFilterType
 
-from asynctasq.core.models import QueueStats, TaskInfo, WorkerInfo
+from asynctasq.core.models import QueueStats, WorkerInfo
 
 from .base_driver import BaseDriver
 
@@ -425,7 +425,7 @@ class SQSDriver(BaseDriver):
             "total": total_pending + total_in_flight,
         }
 
-    async def get_running_tasks(self, limit: int = 50, offset: int = 0) -> list[TaskInfo]:
+    async def get_running_tasks(self, limit: int = 50, offset: int = 0) -> list[tuple[bytes, str]]:
         """SQS cannot enumerate running tasks. Return empty list.
 
         This keeps the interface stable for monitor components that call the
@@ -438,21 +438,25 @@ class SQSDriver(BaseDriver):
         self,
         status: str | None = None,
         queue: str | None = None,
-        worker_id: str | None = None,
         limit: int = 50,
         offset: int = 0,
-        order_by: str = "enqueued_at",
-        order_direction: str = "desc",
-    ) -> tuple[list[TaskInfo], int]:
+    ) -> tuple[list[tuple[bytes, str, str]], int]:
         """SQS does not provide task history. Return empty list and 0 total.
 
         Monitor components that need history should use Redis/Postgres backends.
+
+        Returns:
+            Tuple of (empty list, 0) - SQS does not support task listing
         """
 
         return ([], 0)
 
-    async def get_task_by_id(self, task_id: str) -> TaskInfo | None:
-        """Not supported for SQS driver: return None."""
+    async def get_task_by_id(self, task_id: str) -> bytes | None:
+        """Not supported for SQS driver: return None.
+
+        Returns:
+            None - SQS does not support task lookup by ID
+        """
 
         return None
 

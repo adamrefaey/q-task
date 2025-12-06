@@ -67,17 +67,13 @@ class TestPostgresDriverStatsAndManagement:
         # fetch for get_all_queue_names
         mock_conn.fetch.return_value = [{"queue_name": "a"}, {"queue_name": "b"}]
 
-        # fetch for get_running_tasks
+        # fetch for get_running_tasks (now returns payload, queue_name)
         mock_conn.fetch.side_effect = [
             [{"queue_name": "a"}, {"queue_name": "b"}],
             [
                 {
-                    "id": 1,
+                    "payload": b"task_data",
                     "queue_name": "default",
-                    "attempts": 2,
-                    "max_attempts": 3,
-                    "created_at": None,
-                    "updated_at": None,
                 }
             ],
         ]
@@ -89,6 +85,9 @@ class TestPostgresDriverStatsAndManagement:
 
         tasks = await driver.get_running_tasks()
         assert isinstance(tasks, list)
+        # Now returns list of (bytes, str) tuples
+        assert len(tasks) == 1
+        assert tasks[0] == (b"task_data", "default")
 
     @mark.asyncio
     async def test_get_tasks_and_get_task_by_id(self) -> None:
@@ -106,16 +105,12 @@ class TestPostgresDriverStatsAndManagement:
         tx_ctx.__aexit__ = AsyncMock(return_value=None)
         mock_conn.transaction = MagicMock(return_value=tx_ctx)
 
-        # fetch for list, fetchrow for total
+        # fetch for list (now returns payload, queue_name, status)
         mock_conn.fetch.return_value = [
             {
-                "id": 1,
+                "payload": b"task_data",
                 "queue_name": "default",
                 "status": "pending",
-                "attempts": 0,
-                "max_attempts": 3,
-                "created_at": None,
-                "updated_at": None,
             }
         ]
         mock_conn.fetchrow.return_value = {"count": 1}
@@ -125,19 +120,16 @@ class TestPostgresDriverStatsAndManagement:
         tasks, total = await driver.get_tasks()
         assert total == 1
         assert len(tasks) == 1
+        # Now returns list of (bytes, queue_name, status) tuples
+        assert tasks[0] == (b"task_data", "default", "pending")
 
-        # get_task_by_id
+        # get_task_by_id (now returns just payload bytes)
         mock_conn.fetchrow.return_value = {
-            "id": 1,
-            "queue_name": "default",
-            "status": "pending",
-            "attempts": 0,
-            "max_attempts": 3,
-            "created_at": None,
-            "updated_at": None,
+            "payload": b"task_data_by_id",
         }
         t = await driver.get_task_by_id("1")
         assert t is not None
+        assert t == b"task_data_by_id"
 
     @mark.asyncio
     async def test_retry_and_delete_task(self) -> None:

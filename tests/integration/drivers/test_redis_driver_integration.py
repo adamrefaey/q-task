@@ -568,28 +568,33 @@ class TestRedisDriverWithRealRedis:
         self, redis_driver: RedisDriver, redis_client: Redis
     ) -> None:
         """Integration: test get_running_tasks, get_tasks, get_task_by_id, retry_task, delete_task."""
-        # Arrange - create pending and processing items with 36-char IDs
+        import msgpack
+
+        # Arrange - create pending and processing items with msgpack-serialized data
         id36 = "i" * 36
-        raw_pending = (id36 + ":pending").encode()
-        raw_processing = (id36 + ":processing").encode()
+        task_pending = {"task_id": id36, "task_name": "pending_task"}
+        task_processing = {"task_id": id36, "task_name": "processing_task"}
+        raw_pending: bytes = msgpack.packb(task_pending)  # type: ignore[assignment]
+        raw_processing: bytes = msgpack.packb(task_processing)  # type: ignore[assignment]
         await maybe_await(redis_client.lpush("queue:q", raw_pending))
         await maybe_await(redis_client.lpush("queue:q:processing", raw_processing))
 
         # Act - running tasks
         running = await redis_driver.get_running_tasks(limit=10)
 
-        # Assert
-        assert any(r.queue == "q" for r in running)
-        assert any((r.id == id36) or (r.id == "") for r in running)
+        # Assert - now returns list of (bytes, queue_name) tuples
+        assert any(r[1] == "q" for r in running)
 
         # get_tasks should return both pending and running
         tasks, total = await redis_driver.get_tasks()
         assert total >= 2
 
-        # get_task_by_id should find the id
+        # get_task_by_id should find the id (returns raw msgpack bytes)
         found = await redis_driver.get_task_by_id(id36)
         assert found is not None
-        assert found.id == id36
+        # Verify it's the same msgpack-serialized data
+        found_data = msgpack.unpackb(found, raw=False)
+        assert found_data["task_id"] == id36
 
         # Retry task: add to dead list and retry
         tid = "retry-1"
