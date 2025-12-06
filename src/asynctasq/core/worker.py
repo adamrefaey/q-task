@@ -1,9 +1,7 @@
 import asyncio
 from collections.abc import Sequence
 from datetime import UTC, datetime
-import importlib.util
 import logging
-from pathlib import Path
 import signal
 import socket
 import traceback
@@ -15,6 +13,7 @@ from asynctasq.serializers.msgpack_serializer import MsgpackSerializer
 
 from .events import EventEmitter, EventType, TaskEvent, WorkerEvent
 from .task import Task
+from .task_service import TaskService
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +77,7 @@ class Worker:
         self._tasks_processed = 0
         self._start_time: datetime | None = None
         self._heartbeat_task: asyncio.Task[None] | None = None
+        self._task_service = TaskService(serializer=self.serializer)
 
     async def start(self) -> None:
         """Start the worker loop and block until shutdown.
@@ -293,11 +293,8 @@ class Worker:
                     )
                 )
 
-            # Execute task with timeout
-            if task.timeout:
-                await asyncio.wait_for(task.handle(), timeout=task.timeout)
-            else:
-                await task.handle()
+            # Execute task with timeout (delegated to TaskService)
+            await self._task_service.execute_task(task)
 
             # Calculate duration
             duration_ms = int((datetime.now(UTC) - start_time).total_seconds() * 1000)
@@ -388,11 +385,10 @@ class Worker:
         """Handle task failure with intelligent retry logic.
 
         Retry decision:
-        1. Increment task._attempts counter
-        2. Check if attempts < max_retries
-        3. Call task.should_retry(exception) for custom logic
-        4. If both pass: emit task_retrying and re-enqueue with retry_delay
-        5. If retry exhausted: emit task_failed, call task.failed() and store error
+        1. Check if attempts < max_retries (via TaskService.should_retry)
+        2. Call task.should_retry(exception) for custom logic
+        3. If both pass: emit task_retrying, increment attempts, and re-enqueue
+        4. If retry exhausted: emit task_failed, call task.failed() and store error
 
         Args:
             task: Failed task instance
@@ -400,12 +396,13 @@ class Worker:
             queue_name: Name of the queue the task came from
             start_time: When task processing started
         """
-        task._attempts += 1
         duration_ms = int((datetime.now(UTC) - start_time).total_seconds() * 1000)
         task_id = task._task_id or "unknown"  # Fallback for type safety
 
-        # Check if we should retry
-        if task._attempts < task.max_retries and task.should_retry(exception):
+        # Check if we should retry (uses TaskService for the decision logic)
+        if self._task_service.should_retry(task, exception):
+            # prepare_for_retry increments attempts and serializes
+            serialized_task = self._task_service.prepare_for_retry(task)
             logger.info(f"Retrying task {task_id} (attempt {task._attempts}/{task.max_retries})")
 
             # Emit task_retrying event
@@ -424,12 +421,12 @@ class Worker:
                 )
 
             # Re-enqueue with delay
-            serialized_task = await self._serialize_task(task)
             await self.queue_driver.enqueue(
                 task.queue, serialized_task, delay_seconds=task.retry_delay
             )
         else:
-            # Task has failed permanently
+            # Task has failed permanently - increment to reflect the failed attempt
+            task._attempts += 1
             logger.error(f"Task {task_id} failed permanently after {task._attempts} attempts")
 
             # Emit task_failed event
@@ -448,21 +445,13 @@ class Worker:
                     )
                 )
 
-            try:
-                await task.failed(exception)
-            except Exception as e:
-                logger.exception(f"Error in task.failed() handler: {e}")
+            # Call task's failed() hook via TaskService
+            await self._task_service.handle_task_failed(task, exception)
 
     async def _deserialize_task(self, task_data: bytes) -> Task:
         """Deserialize task from bytes and reconstruct instance.
 
-        Reconstruction process:
-        1. Deserialize bytes to dictionary using queue serializer
-        2. Process params to fetch ORM models if serializer supports it
-        3. Import task class from 'class' field (module.ClassName)
-        4. Create task instance without calling __init__
-        5. Restore task parameters from 'params' dict
-        6. Restore internal metadata (_task_id, _attempts, etc.)
+        Delegates to TaskService for the actual deserialization logic.
 
         Args:
             task_data: Serialized task bytes
@@ -474,119 +463,7 @@ class Worker:
             ImportError: If task class cannot be imported
             AttributeError: If task class not found in module
         """
-        data = await self.serializer.deserialize(task_data)
-
-        # Import task class
-        module_name, class_name = data["class"].rsplit(".", 1)
-        module = __import__(module_name, fromlist=[class_name])
-        task_class = getattr(module, class_name)
-
-        # Reconstruct task
-        task = task_class.__new__(task_class)
-        task.__dict__.update(data["params"])
-
-        # Restore metadata with proper type conversions
-        metadata = data["metadata"]
-        task._task_id = metadata.get("task_id")
-        task._attempts = metadata.get("attempts", 0)
-
-        # Restore dispatched_at as datetime if present
-        dispatched_at_str = metadata.get("dispatched_at")
-        if dispatched_at_str:
-            try:
-                task._dispatched_at = datetime.fromisoformat(dispatched_at_str)
-            except (ValueError, TypeError):
-                # Fallback for older formats or None
-                task._dispatched_at = None
-        else:
-            task._dispatched_at = None
-
-        # Restore task configuration from metadata
-        if "max_retries" in metadata:
-            task.max_retries = metadata["max_retries"]
-        if "retry_delay" in metadata:
-            task.retry_delay = metadata["retry_delay"]
-        if "timeout" in metadata:
-            task.timeout = metadata["timeout"]
-        if "queue" in metadata:
-            task.queue = metadata["queue"]
-
-        # For FunctionTask, reconstruct function reference from metadata
-        if class_name == "FunctionTask" and "func_module" in metadata and "func_name" in metadata:
-            func_module_name = metadata["func_module"]
-            func_name = metadata["func_name"]
-
-            # Handle __main__ module - load from file path
-            if func_module_name == "__main__" and "func_file" in metadata:
-                func_file = Path(metadata["func_file"])
-                # Use a unique module name based on file path to avoid conflicts
-                # and prevent re-execution of __main__ blocks
-                module_name = f"__main___{func_file.stem}_{hash(func_file)}"
-                spec = importlib.util.spec_from_file_location(module_name, func_file)
-                if spec is None or spec.loader is None:
-                    raise ImportError(f"Could not load module from file: {func_file}")
-                func_module = importlib.util.module_from_spec(spec)
-                # Set __name__ to the unique name to prevent __main__ block execution
-                func_module.__name__ = module_name
-                try:
-                    # Execute the module to populate it with the function
-                    spec.loader.exec_module(func_module)
-                except RuntimeError as e:
-                    # Catch RuntimeError from asyncio.run() or similar calls at module level
-                    # that try to create a new event loop when one is already running
-                    if "asyncio.run() cannot be called from a running event loop" in str(e):
-                        # This is expected when loading modules with asyncio.run() at module level
-                        # The function definition should still be available since function
-                        # definitions are executed before the asyncio.run() call
-                        logger.debug(
-                            f"Suppressed asyncio.run() error when loading module {func_file}: {e}"
-                        )
-                        # Verify the function exists despite the error
-                        if not hasattr(func_module, func_name):
-                            raise AttributeError(
-                                f"Function '{func_name}' not found in module {func_file} "
-                                f"after suppressing asyncio.run() error"
-                            ) from None
-                    else:
-                        # Re-raise other RuntimeErrors
-                        raise
-            else:
-                func_module = __import__(func_module_name, fromlist=[func_name])
-
-            task.func = getattr(func_module, func_name)
-
-        return task
-
-    async def _serialize_task(self, task: Task) -> bytes:
-        """Serialize task for re-enqueueing (used for retries).
-
-        Serialization includes:
-        - Task class path (for reconstruction)
-        - Task parameters (non-internal attributes)
-        - Task metadata (_task_id, _attempts, etc.)
-        - Task configuration (queue, max_retries, etc.)
-
-        Args:
-            task: Task instance to serialize
-
-        Returns:
-            bytes: Serialized task data
-        """
-        task_data = {
-            "class": f"{task.__class__.__module__}.{task.__class__.__name__}",
-            "params": {k: v for k, v in task.__dict__.items() if not k.startswith("_")},
-            "metadata": {
-                "task_id": task._task_id,
-                "attempts": task._attempts,
-                "dispatched_at": task._dispatched_at.isoformat() if task._dispatched_at else None,
-                "max_retries": task.max_retries,
-                "retry_delay": task.retry_delay,
-                "timeout": task.timeout,
-                "queue": task.queue,
-            },
-        }
-
-        return self.serializer.serialize(task_data)
+        return await self._task_service.deserialize_task(task_data)
 
     def _handle_shutdown(self) -> None:
         """Handle graceful shutdown."""

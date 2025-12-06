@@ -530,8 +530,8 @@ class TestSQSDriverWithLocalStack:
         assert TEST_QUEUE_NAME in names
 
         stats = await sqs_driver.get_queue_stats(TEST_QUEUE_NAME)
-        assert stats.name == TEST_QUEUE_NAME
-        assert isinstance(stats.depth, int)
+        assert stats["name"] == TEST_QUEUE_NAME
+        assert isinstance(stats["depth"], int)
 
     @mark.asyncio
     async def test_global_stats(self, sqs_driver: SQSDriver) -> None:

@@ -204,12 +204,11 @@ class TestPostgresDriverWithRealPostgres:
         await postgres_driver.enqueue("default", task_data)
 
         # Act - Dequeue
-        receipt_handle = await postgres_driver.dequeue("default", poll_seconds=0)
+        result = await postgres_driver.dequeue("default", poll_seconds=0)
 
-        # Assert
-        assert receipt_handle is not None
-        assert isinstance(receipt_handle, bytes)
-        assert len(receipt_handle) == 16  # UUID bytes
+        # Assert - dequeue returns task_data, not UUID
+        assert result is not None
+        assert result == task_data
 
     @mark.asyncio
     async def test_enqueue_immediate_task(
@@ -341,7 +340,7 @@ class TestPostgresDriverWithRealPostgres:
     async def test_dequeue_returns_receipt_handle(
         self, postgres_driver: PostgresDriver, postgres_conn: asyncpg.Connection
     ) -> None:
-        """dequeue() should return receipt handle (UUID bytes)."""
+        """dequeue() should return task_data (payload bytes)."""
         # Arrange
         task_data = b"test_task"
         await postgres_driver.enqueue("default", task_data)
@@ -349,10 +348,10 @@ class TestPostgresDriverWithRealPostgres:
         # Act
         receipt = await postgres_driver.dequeue("default", poll_seconds=0)
 
-        # Assert
+        # Assert - dequeue returns task_data, not UUID
         assert receipt is not None
         assert isinstance(receipt, bytes)
-        assert len(receipt) == 16  # UUID is 16 bytes
+        assert receipt == task_data
 
     @mark.asyncio
     async def test_dequeue_sets_status_to_processing(
@@ -787,10 +786,9 @@ class TestPostgresDriverWithRealPostgres:
         # Act - should be able to dequeue again
         receipt2 = await postgres_driver.dequeue("default", poll_seconds=0)
 
-        # Assert
+        # Assert - same task_data is returned since it's the same task
         assert receipt2 is not None
-        # Should be different receipt
-        assert receipt2 != receipt
+        assert receipt2 == receipt  # Same task_data
 
     @mark.asyncio
     async def test_get_queue_size_all_combinations(
@@ -1146,7 +1144,8 @@ class TestPostgresDriverWithRealPostgres:
         )
         receipt2 = await postgres_driver.dequeue("default", poll_seconds=0)
         assert receipt2 is not None
-        assert receipt2 != receipt1
+        # Same task_data is returned since it's the same task
+        assert receipt2 == receipt1
 
         # Expire lock second time
         await postgres_conn.execute(
@@ -1155,7 +1154,8 @@ class TestPostgresDriverWithRealPostgres:
         )
         receipt3 = await postgres_driver.dequeue("default", poll_seconds=0)
         assert receipt3 is not None
-        assert receipt3 != receipt2
+        # Same task_data is returned since it's the same task
+        assert receipt3 == receipt2
 
     @mark.asyncio
     async def test_get_queue_size_with_expired_locks(

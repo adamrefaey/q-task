@@ -1,9 +1,8 @@
 import asyncio
 from dataclasses import dataclass, field
+from typing import Any
 
 from asyncmy import Pool, create_pool
-
-from asynctasq.core.models import QueueStats, WorkerInfo
 
 from .base_driver import BaseDriver
 
@@ -431,7 +430,7 @@ class MySQLDriver(BaseDriver):
                 row = await cursor.fetchone()
                 return row[0] if row else 0
 
-    async def get_queue_stats(self, queue: str) -> QueueStats:
+    async def get_queue_stats(self, queue: str) -> dict[str, Any]:
         """Return basic stats for a single queue."""
         if self.pool is None:
             await self.connect()
@@ -458,15 +457,15 @@ class MySQLDriver(BaseDriver):
                 failed_row = await cursor.fetchone()
                 failed_total = int(failed_row[0]) if failed_row else 0
 
-        return QueueStats(
-            name=queue,
-            depth=depth,
-            processing=processing,
-            completed_total=0,
-            failed_total=failed_total,
-            avg_duration_ms=None,
-            throughput_per_minute=None,
-        )
+        return {
+            "name": queue,
+            "depth": depth,
+            "processing": processing,
+            "completed_total": 0,
+            "failed_total": failed_total,
+            "avg_duration_ms": None,
+            "throughput_per_minute": None,
+        }
 
     async def get_all_queue_names(self) -> list[str]:
         """Return list of distinct queue names."""
@@ -653,7 +652,7 @@ class MySQLDriver(BaseDriver):
                 await cursor.execute(del_dlq, (task_id,))
                 return getattr(cursor, "rowcount", 0) > 0
 
-    async def get_worker_stats(self) -> list[WorkerInfo]:
+    async def get_worker_stats(self) -> list[dict[str, Any]]:
         """Return worker stats. Not implemented in MySQL driver; return empty list."""
         # No worker registry table in this driver implementation
         return []

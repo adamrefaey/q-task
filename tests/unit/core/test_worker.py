@@ -917,7 +917,7 @@ class TestWorkerHandleTaskFailure:
         exception = ValueError("Test error")
         start_time = datetime.now(UTC)
 
-        with patch.object(worker, "_serialize_task", return_value=b"serialized"):
+        with patch.object(worker._task_service, "serialize_task", return_value=b"serialized"):
             # Act
             await worker._handle_task_failure(task, exception, "test_queue", start_time)
 
@@ -1038,7 +1038,11 @@ class TestWorkerHandleTaskFailure:
 
         # Mock serialize to raise exception
         with (
-            patch.object(worker, "_serialize_task", side_effect=ValueError("Serialization failed")),
+            patch.object(
+                worker._task_service,
+                "serialize_task",
+                side_effect=ValueError("Serialization failed"),
+            ),
             patch("asynctasq.core.worker.logger"),
         ):
             # Act & Assert
@@ -1064,7 +1068,7 @@ class TestWorkerHandleTaskFailure:
         # Mock enqueue to raise exception
         mock_driver.enqueue = AsyncMock(side_effect=RuntimeError("Enqueue failed"))
 
-        with patch.object(worker, "_serialize_task", return_value=b"serialized"):
+        with patch.object(worker._task_service, "serialize_task", return_value=b"serialized"):
             # Act & Assert
             # Exception should propagate (not caught in current implementation)
             with raises(RuntimeError, match="Enqueue failed"):
@@ -1452,7 +1456,7 @@ class TestWorkerDeserializeTask:
 
 @mark.unit
 class TestWorkerSerializeTask:
-    """Test Worker._serialize_task() method."""
+    """Test TaskService.serialize_task() method via Worker._task_service."""
 
     @mark.asyncio
     async def test_serialize_task_includes_all_metadata(self) -> None:
@@ -1471,7 +1475,7 @@ class TestWorkerSerializeTask:
         task.timeout = 300
 
         # Act
-        result = await worker._serialize_task(task)
+        result = worker._task_service.serialize_task(task)
 
         # Assert
         mock_serializer.serialize.assert_called_once()
@@ -1499,7 +1503,7 @@ class TestWorkerSerializeTask:
         task._private_attr = "should_not_be_included"  # type: ignore[attr-defined]
 
         # Act
-        await worker._serialize_task(task)
+        worker._task_service.serialize_task(task)
 
         # Assert
         call_arg = mock_serializer.serialize.call_args[0][0]
@@ -1522,7 +1526,7 @@ class TestWorkerSerializeTask:
         task._dispatched_at = None
 
         # Act
-        await worker._serialize_task(task)
+        worker._task_service.serialize_task(task)
 
         # Assert
         call_arg = mock_serializer.serialize.call_args[0][0]
@@ -1541,7 +1545,7 @@ class TestWorkerSerializeTask:
 
         # Act & Assert
         with raises(ValueError, match="Serialization error"):
-            await worker._serialize_task(task)
+            worker._task_service.serialize_task(task)
 
     @mark.asyncio
     async def test_deserialize_task_handles_serializer_exception(self) -> None:

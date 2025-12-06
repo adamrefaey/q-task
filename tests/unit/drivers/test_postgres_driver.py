@@ -39,9 +39,9 @@ class TestPostgresDriverStatsAndManagement:
         driver.pool = mock_pool
 
         qs = await driver.get_queue_stats("default")
-        assert qs.name == "default"
-        assert qs.depth == 5
-        assert qs.processing == 2
+        assert qs["name"] == "default"
+        assert qs["depth"] == 5
+        assert qs["processing"] == 2
 
         g = await driver.get_global_stats()
         assert g["pending"] == 10

@@ -421,7 +421,7 @@ class TestDispatcherDispatch:
 
 @mark.unit
 class TestDispatcherSerializeTask:
-    """Test Dispatcher._serialize_task() method."""
+    """Test TaskService.serialize_task() method via Dispatcher._task_service."""
 
     def test_serialize_task_includes_all_metadata(self) -> None:
         # Arrange
@@ -437,7 +437,7 @@ class TestDispatcherSerializeTask:
         task.timeout = 300
 
         # Act
-        dispatcher._serialize_task(task)
+        dispatcher._task_service.serialize_task(task)
 
         # Assert
         mock_serializer.serialize.assert_called_once()
@@ -462,7 +462,7 @@ class TestDispatcherSerializeTask:
         task._private_attr = "should_not_be_included"  # type: ignore[attr-defined]
 
         # Act
-        dispatcher._serialize_task(task)
+        dispatcher._task_service.serialize_task(task)
 
         # Assert
         call_arg = mock_serializer.serialize.call_args[0][0]
@@ -483,11 +483,11 @@ class TestDispatcherSerializeTask:
         task._dispatched_at = None
 
         # Act
-        dispatcher._serialize_task(task)
+        dispatcher._task_service.serialize_task(task)
 
         # Assert
         call_arg = mock_serializer.serialize.call_args[0][0]
-        assert call_arg["metadata"]["dispatched_at"] == ""
+        assert call_arg["metadata"]["dispatched_at"] is None
 
     def test_serialize_task_includes_only_public_attributes(self) -> None:
         # Arrange
@@ -499,7 +499,7 @@ class TestDispatcherSerializeTask:
         task.__dunder__ = "dunder"  # type: ignore[attr-defined]
 
         # Act
-        dispatcher._serialize_task(task)
+        dispatcher._task_service.serialize_task(task)
 
         # Assert
         call_arg = mock_serializer.serialize.call_args[0][0]
@@ -523,7 +523,7 @@ class TestDispatcherSerializeTask:
         task._dispatched_at = None
 
         # Act
-        dispatcher._serialize_task(task)
+        dispatcher._task_service.serialize_task(task)
 
         # Assert
         call_arg = mock_serializer.serialize.call_args[0][0]
@@ -550,7 +550,7 @@ class TestDispatcherSerializeTask:
         task.lambda_attr = lambda x: x  # type: ignore[attr-defined]
 
         # Act
-        dispatcher._serialize_task(task)
+        dispatcher._task_service.serialize_task(task)
 
         # Assert
         call_arg = mock_serializer.serialize.call_args[0][0]
@@ -575,7 +575,7 @@ class TestDispatcherSerializeTask:
         task._dispatched_at = datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC)
 
         # Act
-        dispatcher._serialize_task(task)
+        dispatcher._task_service.serialize_task(task)
 
         # Assert
         mock_serializer.serialize.assert_called_once()
@@ -618,7 +618,7 @@ class TestDispatcherSerializeTask:
             task._dispatched_at = datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC)
 
             # Act
-            dispatcher._serialize_task(task)
+            dispatcher._task_service.serialize_task(task)
 
             # Assert
             call_arg = mock_serializer.serialize.call_args[0][0]
@@ -643,7 +643,7 @@ class TestDispatcherSerializeTask:
         mock_func.__module__ = "__main__"
 
         # Make inspect.getfile raise an error
-        with patch("asynctasq.core.dispatcher.inspect.getfile") as mock_getfile:
+        with patch("asynctasq.core.task_service.inspect.getfile") as mock_getfile:
             mock_getfile.side_effect = OSError("Cannot get file path")
 
             task = FunctionTask(mock_func)
@@ -652,7 +652,7 @@ class TestDispatcherSerializeTask:
             task._dispatched_at = datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC)
 
             # Act
-            dispatcher._serialize_task(task)
+            dispatcher._task_service.serialize_task(task)
 
             # Assert
             call_arg = mock_serializer.serialize.call_args[0][0]
@@ -673,7 +673,7 @@ class TestDispatcherSerializeTask:
         mock_func.__module__ = "__main__"
 
         # Make inspect.getfile raise TypeError
-        with patch("asynctasq.core.dispatcher.inspect.getfile") as mock_getfile:
+        with patch("asynctasq.core.task_service.inspect.getfile") as mock_getfile:
             mock_getfile.side_effect = TypeError("Cannot get file path")
 
             task = FunctionTask(mock_func)
@@ -682,7 +682,7 @@ class TestDispatcherSerializeTask:
             task._dispatched_at = datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC)
 
             # Act
-            dispatcher._serialize_task(task)
+            dispatcher._task_service.serialize_task(task)
 
             # Assert
             call_arg = mock_serializer.serialize.call_args[0][0]
@@ -704,7 +704,7 @@ class TestDispatcherSerializeTask:
         task._attempts = 0
 
         # Act
-        dispatcher._serialize_task(task)
+        dispatcher._task_service.serialize_task(task)
 
         # Assert
         call_arg = mock_serializer.serialize.call_args[0][0]

@@ -7,8 +7,6 @@ from aioboto3 import Session
 from types_aiobotocore_sqs import SQSClient
 from types_aiobotocore_sqs.literals import QueueAttributeFilterType
 
-from asynctasq.core.models import QueueStats, WorkerInfo
-
 from .base_driver import BaseDriver
 
 
@@ -314,15 +312,12 @@ class SQSDriver(BaseDriver):
 
         return count
 
-    async def get_queue_stats(self, queue: str) -> QueueStats:
-        """Return basic QueueStats for the named queue using SQS attributes.
+    async def get_queue_stats(self, queue: str) -> dict[str, Any]:
+        """Return basic stats for the named queue using SQS attributes.
 
         Since SQS only provides approximate counts, this returns conservative
         values and leaves other fields as sensible defaults.
         """
-        # Import locally to avoid circular import at module import time
-        from asynctasq.core.models import QueueStats
-
         if self.client is None:
             await self.connect()
             assert self.client is not None
@@ -341,7 +336,15 @@ class SQSDriver(BaseDriver):
         depth = int(a.get("ApproximateNumberOfMessages", 0))
         in_flight = int(a.get("ApproximateNumberOfMessagesNotVisible", 0))
 
-        return QueueStats(name=queue, depth=depth, processing=in_flight)
+        return {
+            "name": queue,
+            "depth": depth,
+            "processing": in_flight,
+            "completed_total": 0,
+            "failed_total": 0,
+            "avg_duration_ms": None,
+            "throughput_per_minute": None,
+        }
 
     async def _get_queue_url(self, queue_name: str) -> str:
         """Get queue URL with caching.
@@ -414,8 +417,8 @@ class SQSDriver(BaseDriver):
         for u in urls:
             qname = u.rstrip("/").split("/")[-1]
             stats = await self.get_queue_stats(qname)
-            total_pending += stats.depth
-            total_in_flight += stats.processing
+            total_pending += stats["depth"]
+            total_in_flight += stats["processing"]
 
         return {
             "pending": total_pending,
@@ -470,7 +473,7 @@ class SQSDriver(BaseDriver):
 
         return False
 
-    async def get_worker_stats(self) -> list[WorkerInfo]:
+    async def get_worker_stats(self) -> list[dict[str, Any]]:
         """SQS does not track workers. Return empty list.
 
         Systems requiring worker tracking should implement a registry using

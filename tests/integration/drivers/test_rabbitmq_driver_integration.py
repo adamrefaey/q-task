@@ -1111,11 +1111,11 @@ class TestRabbitMQDriverManagementMethods:
         stats = await rabbitmq_driver.get_queue_stats("stats_queue")
 
         # Assert
-        assert stats.name == "stats_queue"
-        assert stats.depth >= 3  # At least 3 tasks
-        assert stats.processing == 0  # No in-flight tasks
-        assert stats.completed_total == 0  # AMQP doesn't track completed
-        assert stats.failed_total == 0  # AMQP doesn't track failed
+        assert stats["name"] == "stats_queue"
+        assert stats["depth"] >= 3  # At least 3 tasks
+        assert stats["processing"] == 0  # No in-flight tasks
+        assert stats["completed_total"] == 0  # AMQP doesn't track completed
+        assert stats["failed_total"] == 0  # AMQP doesn't track failed
 
     @mark.asyncio
     async def test_get_queue_stats_includes_delayed_tasks(
@@ -1130,7 +1130,7 @@ class TestRabbitMQDriverManagementMethods:
         stats = await rabbitmq_driver.get_queue_stats("stats_queue")
 
         # Assert
-        assert stats.depth >= 2  # Immediate + delayed
+        assert stats["depth"] >= 2  # Immediate + delayed
 
     @mark.asyncio
     async def test_get_queue_stats_includes_in_flight(
@@ -1152,7 +1152,7 @@ class TestRabbitMQDriverManagementMethods:
         stats = await rabbitmq_driver.get_queue_stats("stats_queue")
 
         # Assert
-        assert stats.processing == 2  # 2 in-flight messages
+        assert stats["processing"] == 2  # 2 in-flight messages
 
         # Cleanup
         await rabbitmq_driver.ack("stats_queue", receipt1)

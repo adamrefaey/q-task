@@ -904,11 +904,11 @@ class TestRedisDriverInspectionAndManagement:
         stats = await driver.get_queue_stats("default")
 
         # Assert
-        assert stats.name == "default"
-        assert stats.depth == 4
-        assert stats.processing == 2
-        assert stats.completed_total == 10
-        assert stats.failed_total == 3
+        assert stats["name"] == "default"
+        assert stats["depth"] == 4
+        assert stats["processing"] == 2
+        assert stats["completed_total"] == 10
+        assert stats["failed_total"] == 3
 
     @patch("asynctasq.drivers.redis_driver.Redis")
     @mark.asyncio
@@ -1023,79 +1023,130 @@ class TestRedisDriverInspectionAndManagement:
 
     @patch("asynctasq.drivers.redis_driver.Redis")
     @mark.asyncio
-    async def test_get_task_by_id_finds_match(self, mock_redis_class: MagicMock) -> None:
+    async def test_get_task_by_id_returns_none(self, mock_redis_class: MagicMock) -> None:
+        """Redis driver returns None for get_task_by_id - use MonitoringService instead."""
         # Arrange
         mock_client = AsyncMock()
         mock_redis_class.from_url.return_value = mock_client
         driver = RedisDriver()
         await driver.connect()
-        driver.get_all_queue_names = AsyncMock(return_value=["q"])
-        # Create a properly msgpack-serialized task
-        import msgpack
-
-        task_id = "t" * 36
-        task_data = {"task_id": task_id, "task_name": "test_task"}
-        raw = msgpack.packb(task_data)
-        mock_client.lrange = AsyncMock(return_value=[raw])
 
         # Act
-        ti = await driver.get_task_by_id(task_id)
+        result = await driver.get_task_by_id("any-task-id")
 
-        # Assert - now returns raw msgpack bytes
-        assert ti is not None
-        assert ti == raw
+        # Assert - Redis cannot do efficient lookup, returns None
+        assert result is None
 
     @patch("asynctasq.drivers.redis_driver.Redis")
     @mark.asyncio
-    async def test_retry_task_moves_from_dead(self, mock_redis_class: MagicMock) -> None:
+    async def test_retry_task_returns_false(self, mock_redis_class: MagicMock) -> None:
+        """Redis cannot efficiently retry by task_id, returns False."""
         # Arrange
         mock_client = AsyncMock()
         mock_redis_class.from_url.return_value = mock_client
         driver = RedisDriver()
         await driver.connect()
-        driver.get_all_queue_names = AsyncMock(return_value=["q"])
-        # dead list contains a raw that starts with task id
-        task_id = "retry-id-1"
-        raw = (task_id + ":payload").encode()
-        mock_client.lrange = AsyncMock(return_value=[raw])
+
+        # Act
+        ok = await driver.retry_task("any-task-id")
+
+        # Assert - Redis cannot do ID-based lookup, returns False
+        assert ok is False
+
+    @patch("asynctasq.drivers.redis_driver.Redis")
+    @mark.asyncio
+    async def test_retry_raw_task_moves_from_dead(self, mock_redis_class: MagicMock) -> None:
+        """retry_raw_task removes from dead list and re-enqueues."""
+        # Arrange
+        mock_client = AsyncMock()
+        mock_redis_class.from_url.return_value = mock_client
+        driver = RedisDriver()
+        await driver.connect()
+        raw = b"serialized-task-data"
         mock_client.lrem = AsyncMock(return_value=1)
         mock_client.rpush = AsyncMock(return_value=1)
 
         # Act
-        ok = await driver.retry_task(task_id)
+        ok = await driver.retry_raw_task("myqueue", raw)
 
         # Assert
         assert ok is True
-        mock_client.lrem.assert_called_once()
-        mock_client.rpush.assert_called_once()
+        mock_client.lrem.assert_called_once_with("queue:myqueue:dead", 1, raw)
+        mock_client.rpush.assert_called_once_with("queue:myqueue", raw)
 
     @patch("asynctasq.drivers.redis_driver.Redis")
     @mark.asyncio
-    async def test_delete_task_removes_matching(self, mock_redis_class: MagicMock) -> None:
+    async def test_retry_raw_task_not_found(self, mock_redis_class: MagicMock) -> None:
+        """retry_raw_task returns False if task not in dead list."""
         # Arrange
         mock_client = AsyncMock()
         mock_redis_class.from_url.return_value = mock_client
         driver = RedisDriver()
         await driver.connect()
-        driver.get_all_queue_names = AsyncMock(return_value=["q"])
-        task_id = "delme-1"
-        raw = (task_id + ":foo").encode()
+        mock_client.lrem = AsyncMock(return_value=0)
 
-        # lrange for '' returns the item
-        async def lrange_side(key, *a, **k):
-            if key.endswith(":dead"):
-                return [raw]
-            return []
+        # Act
+        ok = await driver.retry_raw_task("myqueue", b"not-found")
 
-        mock_client.lrange = AsyncMock(side_effect=lrange_side)
+        # Assert
+        assert ok is False
+        mock_client.rpush.assert_not_called()
+
+    @patch("asynctasq.drivers.redis_driver.Redis")
+    @mark.asyncio
+    async def test_delete_task_returns_false(self, mock_redis_class: MagicMock) -> None:
+        """Redis cannot efficiently delete by task_id, returns False."""
+        # Arrange
+        mock_client = AsyncMock()
+        mock_redis_class.from_url.return_value = mock_client
+        driver = RedisDriver()
+        await driver.connect()
+
+        # Act
+        removed = await driver.delete_task("any-task-id")
+
+        # Assert - Redis cannot do ID-based lookup, returns False
+        assert removed is False
+
+    @patch("asynctasq.drivers.redis_driver.Redis")
+    @mark.asyncio
+    async def test_delete_raw_task_removes_from_lists(self, mock_redis_class: MagicMock) -> None:
+        """delete_raw_task removes exact bytes from queue lists."""
+        # Arrange
+        mock_client = AsyncMock()
+        mock_redis_class.from_url.return_value = mock_client
+        driver = RedisDriver()
+        await driver.connect()
+        raw = b"serialized-task-data"
         mock_client.lrem = AsyncMock(return_value=1)
 
         # Act
-        removed = await driver.delete_task(task_id)
+        removed = await driver.delete_raw_task("myqueue", raw)
 
         # Assert
         assert removed is True
-        mock_client.lrem.assert_called_once()
+        # Should try to remove from all three lists
+        assert mock_client.lrem.call_count == 3
+        mock_client.lrem.assert_any_call("queue:myqueue", 1, raw)
+        mock_client.lrem.assert_any_call("queue:myqueue:processing", 1, raw)
+        mock_client.lrem.assert_any_call("queue:myqueue:dead", 1, raw)
+
+    @patch("asynctasq.drivers.redis_driver.Redis")
+    @mark.asyncio
+    async def test_delete_raw_task_not_found(self, mock_redis_class: MagicMock) -> None:
+        """delete_raw_task returns False if task not in any list."""
+        # Arrange
+        mock_client = AsyncMock()
+        mock_redis_class.from_url.return_value = mock_client
+        driver = RedisDriver()
+        await driver.connect()
+        mock_client.lrem = AsyncMock(return_value=0)
+
+        # Act
+        removed = await driver.delete_raw_task("myqueue", b"not-found")
+
+        # Assert
+        assert removed is False
 
     @patch("asynctasq.drivers.redis_driver.Redis")
     @mark.asyncio
@@ -1124,8 +1175,8 @@ class TestRedisDriverInspectionAndManagement:
         assert isinstance(workers, list)
         assert len(workers) == 1
         w = workers[0]
-        assert w.worker_id == "abc"
-        assert w.status == "busy"
+        assert w["worker_id"] == "abc"
+        assert w["status"] == "busy"
 
 
 if __name__ == "__main__":

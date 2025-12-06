@@ -1249,11 +1249,11 @@ class TestRabbitMQDriverGetQueueStats:
             stats = await driver.get_queue_stats("default")
 
             # Assert
-            assert stats.name == "default"
-            assert stats.depth == 7  # 5 + 2 (main + delayed)
-            assert stats.processing == 0
-            assert stats.completed_total == 0
-            assert stats.failed_total == 0
+            assert stats["name"] == "default"
+            assert stats["depth"] == 7  # 5 + 2 (main + delayed)
+            assert stats["processing"] == 0
+            assert stats["completed_total"] == 0
+            assert stats["failed_total"] == 0
 
     @mark.asyncio
     async def test_get_queue_stats_includes_in_flight(self) -> None:
@@ -1290,8 +1290,8 @@ class TestRabbitMQDriverGetQueueStats:
             stats = await driver.get_queue_stats("default")
 
             # Assert
-            assert stats.processing == 2
-            assert stats.depth == 4  # 3 + 1 (main + delayed)
+            assert stats["processing"] == 2
+            assert stats["depth"] == 4  # 3 + 1 (main + delayed)
 
 
 @mark.unit

@@ -6,8 +6,6 @@ from typing import Any
 
 from redis.asyncio import Redis
 
-from asynctasq.core.models import QueueStats, WorkerInfo
-
 from .base_driver import BaseDriver
 
 
@@ -265,7 +263,7 @@ class RedisDriver(BaseDriver):
 
     # --- Metadata / Inspection methods -------------------------------------------------
 
-    async def get_queue_stats(self, queue: str) -> QueueStats:
+    async def get_queue_stats(self, queue: str) -> dict[str, Any]:
         """
         Basic stats for a specific queue.
 
@@ -284,15 +282,15 @@ class RedisDriver(BaseDriver):
         failed_raw = await maybe_await(self.client.get(f"queue:{queue}:stats:failed"))
         failed_total = int(failed_raw or 0)
 
-        return QueueStats(
-            name=queue,
-            depth=depth,
-            processing=processing,
-            completed_total=completed_total,
-            failed_total=failed_total,
-            avg_duration_ms=None,
-            throughput_per_minute=None,
-        )
+        return {
+            "name": queue,
+            "depth": depth,
+            "processing": processing,
+            "completed_total": completed_total,
+            "failed_total": failed_total,
+            "avg_duration_ms": None,
+            "throughput_per_minute": None,
+        }
 
     async def get_all_queue_names(self) -> list[str]:
         """Return all queue names discovered by key patterns.
@@ -419,95 +417,116 @@ class RedisDriver(BaseDriver):
         return paged, total
 
     async def get_task_by_id(self, task_id: str) -> bytes | None:
-        """Best-effort lookup by scanning pending and processing lists for matching id.
+        """Redis cannot efficiently look up tasks by ID without deserialization.
 
-        Returns raw msgpack bytes or None if not found.
+        Returns None. Use MonitoringService.get_task_info_by_id() which uses
+        the serializer to scan and find tasks by ID.
+
+        Note:
+            Redis stores tasks as raw bytes in lists. Finding a task by its
+            internal task_id field requires deserializing every task, which
+            should be done at the service layer with access to a serializer.
         """
-        if self.client is None:
-            await self.connect()
-            assert self.client is not None
-
-        queues = await self.get_all_queue_names()
-
-        for q in queues:
-            for key_suffix in ("", ":processing"):
-                items = await maybe_await(self.client.lrange(f"queue:{q}{key_suffix}", 0, -1))
-                for raw in items:
-                    if isinstance(raw, (bytes, bytearray)):
-                        # We need to deserialize to check task_id, but return raw bytes
-                        # For now, scan by deserializing temporarily
-                        try:
-                            from msgpack import unpackb
-
-                            task_dict = unpackb(raw, raw=False)
-                            if task_dict.get("task_id") == task_id:
-                                return bytes(raw)
-                        except Exception:
-                            continue
-
+        # Redis cannot do primary key lookup - task_id is inside the serialized payload
+        # Return None; callers should use MonitoringService which has access to serializer
         return None
 
     async def retry_task(self, task_id: str) -> bool:
-        """Retry a failed task by moving it back to the queue.
+        """Redis cannot efficiently retry tasks by ID.
 
-        This implementation searches for the task in a dead-letter list `queue:{q}:dead`.
-        If found, it LPUSHes it back to the main queue and increments attempt counter.
+        Redis stores tasks as raw bytes in lists. Finding a task by its
+        internal task_id field requires deserializing every task, which
+        should be done at the service layer with access to a serializer.
+
+        Returns:
+            False - use TaskService.retry_task() which can scan and deserialize.
         """
-        if self.client is None:
-            await self.connect()
-            assert self.client is not None
-
-        queues = await self.get_all_queue_names()
-
-        for q in queues:
-            dead_key = f"queue:{q}:dead"
-            items = await maybe_await(self.client.lrange(dead_key, 0, -1))
-            for raw in items:
-                if isinstance(raw, (bytes, bytearray)) and raw.startswith(task_id.encode()):
-                    # remove from dead list and push back to main queue
-                    await maybe_await(self.client.lrem(dead_key, 1, raw))  # type: ignore[arg-type]
-                    await maybe_await(self.client.rpush(f"queue:{q}", raw))
-                    return True
-
+        # Redis cannot do primary key lookup - task_id is inside the serialized payload
+        # Return False; callers should use TaskService which has access to serializer
         return False
 
     async def delete_task(self, task_id: str) -> bool:
-        """Delete a task from pending, processing, or dead lists.
+        """Redis cannot efficiently delete tasks by ID.
 
-        Returns True if removed from any list.
+        Redis stores tasks as raw bytes in lists. Finding a task by its
+        internal task_id field requires deserializing every task, which
+        should be done at the service layer with access to a serializer.
+
+        Returns:
+            False - use TaskService.delete_task() which can scan and deserialize.
+        """
+        # Redis cannot do primary key lookup - task_id is inside the serialized payload
+        # Return False; callers should use TaskService which has access to serializer
+        return False
+
+    async def delete_raw_task(self, queue_name: str, raw_bytes: bytes) -> bool:
+        """Delete a task by its raw serialized bytes.
+
+        Uses LREM to remove the exact bytes from pending, processing, and dead lists.
+
+        Args:
+            queue_name: Name of the queue containing the task
+            raw_bytes: The exact raw bytes of the task to delete
+
+        Returns:
+            True if deleted from any list, False if not found
         """
         if self.client is None:
             await self.connect()
             assert self.client is not None
 
-        queues = await self.get_all_queue_names()
+        removed = 0
+        for key_suffix in ("", ":processing", ":dead"):
+            key = f"queue:{queue_name}{key_suffix}"
+            # LREM returns count of removed elements
+            count: int = await maybe_await(
+                self.client.lrem(key, 1, raw_bytes)  # type: ignore[arg-type]
+            )
+            removed += count
 
-        for q in queues:
-            removed = 0
-            for key_suffix in ("", ":processing", ":dead"):
-                key = f"queue:{q}{key_suffix}"
-                # lrem requires the exact member bytes - we'll remove by prefix match
-                items = await maybe_await(self.client.lrange(key, 0, -1))
-                for raw in items:
-                    if isinstance(raw, (bytes, bytearray)) and raw.startswith(task_id.encode()):
-                        await maybe_await(self.client.lrem(key, 1, raw))  # type: ignore[arg-type]
-                        removed += 1
-            if removed > 0:
-                return True
+        return removed > 0
+
+    async def retry_raw_task(self, queue_name: str, raw_bytes: bytes) -> bool:
+        """Retry a task by its raw serialized bytes.
+
+        Removes the task from dead list and re-enqueues to main queue.
+
+        Args:
+            queue_name: Name of the queue containing the task
+            raw_bytes: The exact raw bytes of the task to retry
+
+        Returns:
+            True if retried, False if not found in dead list
+        """
+        if self.client is None:
+            await self.connect()
+            assert self.client is not None
+
+        dead_key = f"queue:{queue_name}:dead"
+        main_key = f"queue:{queue_name}"
+
+        # Remove from dead list
+        removed: int = await maybe_await(
+            self.client.lrem(dead_key, 1, raw_bytes)  # type: ignore[arg-type]
+        )
+
+        if removed > 0:
+            # Re-enqueue to main queue
+            await maybe_await(self.client.rpush(main_key, raw_bytes))
+            return True
 
         return False
 
-    async def get_worker_stats(self) -> list[WorkerInfo]:
+    async def get_worker_stats(self) -> list[dict[str, Any]]:
         """Return worker heartbeats stored in `workers:{id}` hashes.
 
-        Best-effort: scans keys `worker:*` and builds WorkerInfo objects.
+        Best-effort: scans keys `worker:*` and builds worker dicts.
         """
-        # WorkerInfo and datetime imported at module level
         if self.client is None:
             await self.connect()
             assert self.client is not None
 
-        workers: list[WorkerInfo] = []
+        workers: list[dict[str, Any]] = []
         cur = 0
         while True:
             cur, keys = await maybe_await(self.client.scan(cur, match="worker:*"))
@@ -530,18 +549,19 @@ class RedisDriver(BaseDriver):
                         last_hb = None
 
                 workers.append(
-                    WorkerInfo(
-                        worker_id=worker_id,
-                        status=status,
-                        current_task_id=None,
-                        tasks_processed=int(
+                    {
+                        "worker_id": worker_id,
+                        "status": status,
+                        "current_task_id": None,
+                        "tasks_processed": int(
                             data.get(b"tasks_processed") or data.get("tasks_processed") or 0
                         ),
-                        uptime_seconds=int(
+                        "uptime_seconds": int(
                             data.get(b"uptime_seconds") or data.get("uptime_seconds") or 0
                         ),
-                        last_heartbeat=last_hb,
-                    )
+                        "last_heartbeat": last_hb,
+                        "load_percentage": 0.0,
+                    }
                 )
             if cur == 0:
                 break

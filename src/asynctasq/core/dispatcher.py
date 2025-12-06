@@ -1,5 +1,4 @@
 from datetime import UTC, datetime
-import inspect
 import logging
 from typing import TYPE_CHECKING, cast
 import uuid
@@ -11,11 +10,10 @@ from asynctasq.serializers import BaseSerializer, MsgpackSerializer
 
 from .driver_factory import DriverFactory
 from .events import EventEmitter, EventType, TaskEvent
+from .task_service import TaskService
 
 if TYPE_CHECKING:
-    from .task import FunctionTask, Task
-else:
-    from .task import FunctionTask
+    from .task import Task
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +40,7 @@ class Dispatcher:
         self.serializer = serializer or MsgpackSerializer()
         self.event_emitter = event_emitter
         self._driver_cache: dict[str, BaseDriver] = {}  # Cache for driver overrides
+        self._task_service = TaskService(serializer=self.serializer)
 
     def _get_driver(self, task: "Task") -> BaseDriver:
         """Get the appropriate driver for this task.
@@ -106,7 +105,7 @@ class Dispatcher:
         # Get driver and serialize task
         driver = self._get_driver(task)
         driver_type = driver.__class__.__name__
-        serialized_task = self._serialize_task(task)
+        serialized_task = self._task_service.serialize_task(task)
 
         # Enqueue
         await driver.enqueue(target_queue, serialized_task, delay_seconds)
@@ -130,50 +129,6 @@ class Dispatcher:
         )
 
         return task_id
-
-    def _serialize_task(self, task: "Task") -> bytes:
-        """Serialize task for queue storage."""
-        # Filter out private attributes and callable objects (like functions)
-        params = {
-            k: v for k, v in task.__dict__.items() if not k.startswith("_") and not callable(v)
-        }
-
-        # Build metadata
-        metadata = {
-            "task_id": task._task_id,
-            "attempts": task._attempts,
-            "dispatched_at": task._dispatched_at.isoformat()
-            if task._dispatched_at is not None
-            else "",
-            "max_retries": task.max_retries,
-            "retry_delay": task.retry_delay,
-            "timeout": task.timeout,
-            "queue": task.queue,
-        }
-
-        # For FunctionTask, store function reference instead of function object
-        if isinstance(task, FunctionTask):
-            func = task.func
-            metadata["func_name"] = func.__name__
-
-            # Handle __main__ module specially - store file path instead
-            if func.__module__ == "__main__":
-                try:
-                    file_path = inspect.getfile(func)
-                    metadata["func_module"] = "__main__"
-                    metadata["func_file"] = file_path
-                except (TypeError, OSError):
-                    # Fallback if we can't get the file path
-                    metadata["func_module"] = func.__module__
-            else:
-                metadata["func_module"] = func.__module__
-
-        task_data = {
-            "class": f"{task.__class__.__module__}.{task.__class__.__name__}",
-            "params": params,
-            "metadata": metadata,
-        }
-        return self.serializer.serialize(task_data)
 
 
 # Global dispatcher management

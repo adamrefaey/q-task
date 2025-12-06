@@ -246,12 +246,11 @@ class TestMySQLDriverWithRealMySQL:
         await mysql_driver.enqueue("default", task_data)
 
         # Act - Dequeue
-        receipt_handle = await mysql_driver.dequeue("default", poll_seconds=0)
+        result = await mysql_driver.dequeue("default", poll_seconds=0)
 
-        # Assert
-        assert receipt_handle is not None
-        assert isinstance(receipt_handle, bytes)
-        assert len(receipt_handle) == 16  # UUID bytes
+        # Assert - dequeue returns task_data, not UUID
+        assert result is not None
+        assert result == task_data
 
     @mark.asyncio
     async def test_enqueue_immediate_task(
@@ -344,7 +343,7 @@ class TestMySQLDriverWithRealMySQL:
     async def test_dequeue_returns_receipt_handle(
         self, mysql_driver: MySQLDriver, mysql_conn: asyncmy.Connection
     ) -> None:
-        """dequeue() should return receipt handle (UUID bytes)."""
+        """dequeue() should return task_data (payload bytes)."""
         # Arrange
         task_data = b"test_task"
         await mysql_driver.enqueue("default", task_data)
@@ -352,10 +351,10 @@ class TestMySQLDriverWithRealMySQL:
         # Act
         receipt = await mysql_driver.dequeue("default", poll_seconds=0)
 
-        # Assert
+        # Assert - dequeue returns task_data, not UUID
         assert receipt is not None
         assert isinstance(receipt, bytes)
-        assert len(receipt) == 16  # UUID is 16 bytes
+        assert receipt == task_data
 
     @mark.asyncio
     async def test_dequeue_sets_status_to_processing(
@@ -996,8 +995,8 @@ class TestMySQLDriverWithRealMySQL:
         qs = await mysql_driver.get_queue_stats("mqueue")
 
         # Assert
-        assert qs.name == "mqueue"
-        assert qs.depth >= 2
+        assert qs["name"] == "mqueue"
+        assert qs["depth"] >= 2
 
         # get_all_queue_names should include our queue
         names = await mysql_driver.get_all_queue_names()

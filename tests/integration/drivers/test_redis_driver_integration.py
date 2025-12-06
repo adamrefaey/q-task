@@ -539,11 +539,11 @@ class TestRedisDriverWithRealRedis:
         stats = await redis_driver.get_queue_stats("statsq")
 
         # Assert
-        assert stats.name == "statsq"
-        assert stats.depth == 2
-        assert stats.processing == 1
-        assert stats.completed_total == 7
-        assert stats.failed_total == 1
+        assert stats["name"] == "statsq"
+        assert stats["depth"] == 2
+        assert stats["processing"] == 1
+        assert stats["completed_total"] == 7
+        assert stats["failed_total"] == 1
 
         # Create another queue and verify get_all_queue_names + global aggregation
         await maybe_await(redis_client.lpush("queue:alpha", b"x"))
@@ -567,7 +567,12 @@ class TestRedisDriverWithRealRedis:
     async def test_task_listing_and_lookup_and_retry_delete(
         self, redis_driver: RedisDriver, redis_client: Redis
     ) -> None:
-        """Integration: test get_running_tasks, get_tasks, get_task_by_id, retry_task, delete_task."""
+        """Integration: test get_running_tasks, get_tasks.
+
+        Note: get_task_by_id, retry_task, and delete_task return None/False
+        for Redis driver because they require deserialization to find task IDs.
+        These operations should be done through TaskService instead.
+        """
         import msgpack
 
         # Arrange - create pending and processing items with msgpack-serialized data
@@ -589,40 +594,28 @@ class TestRedisDriverWithRealRedis:
         tasks, total = await redis_driver.get_tasks()
         assert total >= 2
 
-        # get_task_by_id should find the id (returns raw msgpack bytes)
+        # get_task_by_id returns None for Redis driver (requires deserialization)
         found = await redis_driver.get_task_by_id(id36)
-        assert found is not None
-        # Verify it's the same msgpack-serialized data
-        found_data = msgpack.unpackb(found, raw=False)
-        assert found_data["task_id"] == id36
+        assert found is None  # Expected: Redis driver can't do ID lookup without serializer
 
-        # Retry task: add to dead list and retry
+        # retry_task returns False for Redis driver (requires deserialization)
         tid = "retry-1"
         raw_dead = (tid + ":x").encode()
         await maybe_await(redis_client.lpush("queue:q:dead", raw_dead))
         ok = await redis_driver.retry_task(tid)
-        assert ok is True
-        # After retry, item should be back on main queue
-        popped = await maybe_await(redis_client.rpop("queue:q"))
-        assert popped == raw_dead
+        assert ok is False  # Expected: Redis driver can't do ID-based retry
 
-        # Delete task: add item to pending/processing/dead and delete by id prefix
+        # delete_task returns False for Redis driver (requires deserialization)
         tid2 = "del-1"
         raw1 = (tid2 + ":a").encode()
-        raw2 = (tid2 + ":b").encode()
         await maybe_await(redis_client.lpush("queue:q", raw1))
-        await maybe_await(redis_client.lpush("queue:q:processing", raw2))
-        await maybe_await(redis_client.lpush("queue:q:dead", raw1))
-
         removed = await redis_driver.delete_task(tid2)
-        assert removed is True
-        # Ensure items are no longer present
+        assert removed is False  # Expected: Redis driver can't do ID-based delete
+
+        # Test raw operations work (these are the primitives TaskService uses)
+        await redis_driver.delete_raw_task("q", raw1)
         pending_items = await maybe_await(redis_client.lrange("queue:q", 0, -1))
-        processing_items = await maybe_await(redis_client.lrange("queue:q:processing", 0, -1))
-        dead_items = await maybe_await(redis_client.lrange("queue:q:dead", 0, -1))
-        assert all(not (it.startswith(tid2.encode())) for it in pending_items)
-        assert all(not (it.startswith(tid2.encode())) for it in processing_items)
-        assert all(not (it.startswith(tid2.encode())) for it in dead_items)
+        assert raw1 not in pending_items
 
     @mark.asyncio
     async def test_get_worker_stats_integration(
@@ -646,7 +639,7 @@ class TestRedisDriverWithRealRedis:
         workers = await redis_driver.get_worker_stats()
 
         # Assert - find worker abc
-        assert any(w.worker_id == "abc" for w in workers)
+        assert any(w["worker_id"] == "abc" for w in workers)
 
 
 @mark.integration

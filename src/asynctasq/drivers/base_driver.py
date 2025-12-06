@@ -1,6 +1,5 @@
 from abc import ABC, abstractmethod
-
-from asynctasq.core.models import QueueStats, WorkerInfo
+from typing import Any
 
 
 class BaseDriver(ABC):
@@ -9,6 +8,10 @@ class BaseDriver(ABC):
     Defines the contract for queue operations that enable task enqueueing,
     dequeueing, acknowledgment, and queue inspection. Drivers can implement
     delays differently based on their underlying technology.
+
+    Note:
+        Monitoring methods yield raw data (dicts/tuples) rather than models.
+        Use MonitoringService to convert raw data to typed models.
     """
 
     @abstractmethod
@@ -138,7 +141,7 @@ class BaseDriver(ABC):
         ...
 
     @abstractmethod
-    async def get_queue_stats(self, queue: str) -> QueueStats:
+    async def get_queue_stats(self, queue: str) -> dict[str, Any]:
         """
         Get real-time statistics for a specific queue.
 
@@ -146,7 +149,8 @@ class BaseDriver(ABC):
             queue: Queue name
 
         Returns:
-            QueueStats with depth, processing count, totals
+            Dict with keys: name, depth, processing, completed_total, failed_total,
+            avg_duration_ms (optional), throughput_per_minute (optional)
 
         Implementation Notes:
             - Redis: Use LLEN for depth, ZCARD for processing, counters for totals
@@ -277,18 +281,43 @@ class BaseDriver(ABC):
             True if successfully re-enqueued, False otherwise
 
         Implementation Notes:
-            - Only allow retry if status is FAILED or CANCELLED
-            - Increment attempt counter
-            - Reset started_at and completed_at
-            - Set status back to PENDING
-            - Preserve original enqueued_at
+            - Use primary key lookup for efficient retry (Postgres/MySQL)
+            - For drivers without ID-based indexing (Redis), return False
+              and let TaskService handle via retry_raw_task + scanning
+            - Only allow retry if status is FAILED or in dead-letter queue
+            - Reset status back to PENDING
         """
         pass
+
+    async def retry_raw_task(self, queue_name: str, raw_bytes: bytes) -> bool:
+        """
+        Retry a task by its raw serialized bytes.
+
+        This is a primitive operation for drivers that cannot efficiently
+        lookup tasks by ID (like Redis). TaskService uses this after
+        finding the task via scanning and deserialization.
+
+        The operation should:
+        1. Remove the task from dead/failed lists
+        2. Re-enqueue to the main queue
+
+        Args:
+            queue_name: Name of the queue containing the task
+            raw_bytes: The exact raw bytes of the task to retry
+
+        Returns:
+            True if retried, False if not found
+
+        Note:
+            Default implementation returns False. Override in drivers
+            that support raw bytes operations (e.g., Redis).
+        """
+        return False
 
     @abstractmethod
     async def delete_task(self, task_id: str) -> bool:
         """
-        Delete a task from queue/history.
+        Delete a task from queue/history by ID.
 
         Args:
             task_id: Task UUID to delete
@@ -297,19 +326,44 @@ class BaseDriver(ABC):
             True if deleted, False if not found
 
         Implementation Notes:
+            - Use primary key lookup for efficient deletion (Postgres/MySQL)
+            - For drivers without ID-based indexing (Redis), return False
+              and let TaskService handle via delete_raw_task + scanning
             - Remove from queue if pending
-            - Archive to deleted_tasks table (soft delete) or hard delete
             - Don't allow deleting running tasks (return False)
         """
         pass
 
+    async def delete_raw_task(self, queue_name: str, raw_bytes: bytes) -> bool:
+        """
+        Delete a task by its raw serialized bytes.
+
+        This is a primitive operation for drivers that cannot efficiently
+        lookup tasks by ID (like Redis). TaskService uses this after
+        finding the task via scanning and deserialization.
+
+        Args:
+            queue_name: Name of the queue containing the task
+            raw_bytes: The exact raw bytes of the task to delete
+
+        Returns:
+            True if deleted, False if not found
+
+        Note:
+            Default implementation returns False. Override in drivers
+            that support raw bytes deletion (e.g., Redis with LREM).
+        """
+        return False
+
     @abstractmethod
-    async def get_worker_stats(self) -> list[WorkerInfo]:
+    async def get_worker_stats(self) -> list[dict[str, Any]]:
         """
         Get statistics for all active workers.
 
         Returns:
-            List of WorkerInfo objects
+            List of dicts with keys: worker_id, status, current_task_id (optional),
+            tasks_processed, uptime_seconds, last_heartbeat (ISO string or None),
+            load_percentage
 
         Implementation Notes:
             - Workers send heartbeat every 30 seconds

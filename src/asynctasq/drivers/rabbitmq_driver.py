@@ -2,6 +2,7 @@ import asyncio
 from dataclasses import dataclass, field
 import struct
 from time import time as current_time
+from typing import Any
 
 import aio_pika
 from aio_pika.abc import (
@@ -13,8 +14,6 @@ from aio_pika.abc import (
 )
 from aio_pika.exceptions import AMQPConnectionError as AioPikaConnectionError
 import aiormq.exceptions as _aiormq_excs
-
-from asynctasq.core.models import QueueStats, WorkerInfo
 
 from .base_driver import BaseDriver
 
@@ -594,14 +593,14 @@ class RabbitMQDriver(BaseDriver):
             # Requeue by nacking with requeue=True
             await message.nack(requeue=True)
 
-    async def get_queue_stats(self, queue: str) -> QueueStats:
+    async def get_queue_stats(self, queue: str) -> dict[str, Any]:
         """Get real-time statistics for a specific queue.
 
         Args:
             queue: Queue name
 
         Returns:
-            QueueStats with depth, processing count, totals
+            Dict with depth, processing count, totals
 
         Implementation:
             - Uses queue.declare() to get message_count (ready messages)
@@ -629,15 +628,15 @@ class RabbitMQDriver(BaseDriver):
         # Total depth includes delayed
         total_depth = depth + delayed_count
 
-        return QueueStats(
-            name=queue,
-            depth=total_depth,
-            processing=processing,
-            completed_total=0,  # AMQP doesn't track completed tasks
-            failed_total=0,  # AMQP doesn't track failed tasks
-            avg_duration_ms=None,  # Not available without external tracking
-            throughput_per_minute=None,  # Not available without external tracking
-        )
+        return {
+            "name": queue,
+            "depth": total_depth,
+            "processing": processing,
+            "completed_total": 0,  # AMQP doesn't track completed tasks
+            "failed_total": 0,  # AMQP doesn't track failed tasks
+            "avg_duration_ms": None,  # Not available without external tracking
+            "throughput_per_minute": None,  # Not available without external tracking
+        }
 
     async def get_all_queue_names(self) -> list[str]:
         """Get list of all queue names.
@@ -694,8 +693,8 @@ class RabbitMQDriver(BaseDriver):
 
             for queue_name in queue_names:
                 stats = await self.get_queue_stats(queue_name)
-                pending += stats.depth
-                running += stats.processing
+                pending += stats["depth"]
+                running += stats["processing"]
 
             return {
                 "pending": pending,
@@ -810,11 +809,11 @@ class RabbitMQDriver(BaseDriver):
         # Would require external storage (Redis/DB) to track and delete tasks
         return False
 
-    async def get_worker_stats(self) -> list[WorkerInfo]:
+    async def get_worker_stats(self) -> list[dict[str, Any]]:
         """Get statistics for all active workers.
 
         Returns:
-            List of WorkerInfo objects
+            List of worker dicts
 
         Implementation:
             - AMQP doesn't track worker information

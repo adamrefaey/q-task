@@ -1,9 +1,8 @@
 import asyncio
 from dataclasses import dataclass, field
+from typing import Any
 
 from asyncpg import Pool, create_pool
-
-from asynctasq.core.models import QueueStats, WorkerInfo
 
 from .base_driver import BaseDriver
 
@@ -341,7 +340,7 @@ class PostgresDriver(BaseDriver):
         row = await self.pool.fetchrow(query, queue_name)
         return row["count"] if row else 0
 
-    async def get_queue_stats(self, queue: str) -> QueueStats:
+    async def get_queue_stats(self, queue: str) -> dict[str, Any]:
         """Return basic stats for a single queue."""
         if self.pool is None:
             await self.connect()
@@ -363,15 +362,15 @@ class PostgresDriver(BaseDriver):
             failed_row = await conn.fetchrow(failed_q, queue)
             failed_total = int(failed_row["count"]) if failed_row else 0
 
-        return QueueStats(
-            name=queue,
-            depth=depth,
-            processing=processing,
-            completed_total=0,
-            failed_total=failed_total,
-            avg_duration_ms=None,
-            throughput_per_minute=None,
-        )
+        return {
+            "name": queue,
+            "depth": depth,
+            "processing": processing,
+            "completed_total": 0,
+            "failed_total": failed_total,
+            "avg_duration_ms": None,
+            "throughput_per_minute": None,
+        }
 
     async def get_all_queue_names(self) -> list[str]:
         """Return list of distinct queue names."""
@@ -548,6 +547,6 @@ class PostgresDriver(BaseDriver):
             row2 = await conn.fetchrow(del_dlq, task_id)
             return bool(row2)
 
-    async def get_worker_stats(self) -> list[WorkerInfo]:
+    async def get_worker_stats(self) -> list[dict[str, Any]]:
         """Return worker stats. Not implemented in Postgres driver; return empty list."""
         return []
