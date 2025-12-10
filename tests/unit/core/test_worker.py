@@ -16,15 +16,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from pytest import main, mark, raises
 
 from asynctasq.core.events import EventType
-from asynctasq.core.task import FunctionTask, Task
 from asynctasq.core.worker import Worker
 from asynctasq.drivers.base_driver import BaseDriver
-from asynctasq.serializers.base_serializer import BaseSerializer
-from asynctasq.serializers.msgpack_serializer import MsgpackSerializer
+from asynctasq.serializers import BaseSerializer, MsgpackSerializer
+from asynctasq.tasks import BaseTask, FunctionTask
 
 
 # Test implementations for abstract Task
-class ConcreteTask(Task[str]):
+class ConcreteTask(BaseTask[str]):
     """Concrete implementation of Task for testing."""
 
     def __init__(self, **kwargs: Any) -> None:
@@ -1836,7 +1835,7 @@ class TestWorkerIntegration:
 
         original_deserialize = worker._deserialize_task
 
-        async def deserialize_with_failing_handle(task_data: bytes) -> Task:
+        async def deserialize_with_failing_handle(task_data: bytes) -> BaseTask:
             # Deserialize the task normally
             deserialized_task = await original_deserialize(task_data)
             # Set the failing handle on the deserialized instance

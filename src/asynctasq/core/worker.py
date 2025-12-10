@@ -8,13 +8,10 @@ import traceback
 import uuid
 
 from asynctasq.drivers.base_driver import BaseDriver
-from asynctasq.serializers.base_serializer import BaseSerializer
-from asynctasq.serializers.msgpack_serializer import MsgpackSerializer
+from asynctasq.serializers import BaseSerializer, MsgpackSerializer
+from asynctasq.tasks import BaseTask, ProcessTask, TaskService
 
 from .events import EventEmitter, EventType, TaskEvent, WorkerEvent
-from .process_task import ProcessTask
-from .task import Task
-from .task_service import TaskService
 
 logger = logging.getLogger(__name__)
 
@@ -296,7 +293,7 @@ class Worker:
             task_data: Serialized task bytes from queue
             queue_name: Name of the queue the task came from
         """
-        task: Task | None = None
+        task: BaseTask | None = None
         start_time = datetime.now(UTC)
 
         try:
@@ -408,7 +405,7 @@ class Worker:
         # multiple errors if task spawns subtasks
 
     async def _handle_task_failure(
-        self, task: Task, exception: Exception, queue_name: str, start_time: datetime
+        self, task: BaseTask, exception: Exception, queue_name: str, start_time: datetime
     ) -> None:
         """Handle task failure with intelligent retry logic.
 
@@ -476,7 +473,7 @@ class Worker:
             # Call task's failed() hook via TaskService
             await self._task_service.handle_task_failed(task, exception)
 
-    async def _deserialize_task(self, task_data: bytes) -> Task:
+    async def _deserialize_task(self, task_data: bytes) -> BaseTask:
         """Deserialize task from bytes and reconstruct instance.
 
         Delegates to TaskService for the actual deserialization logic.

@@ -5,7 +5,7 @@ import os
 
 import pytest
 
-from asynctasq.core.process_task import ProcessTask
+from asynctasq.tasks import ProcessTask
 
 
 class SimpleFactorialTask(ProcessTask[int]):

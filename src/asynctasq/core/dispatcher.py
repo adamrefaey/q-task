@@ -7,13 +7,13 @@ from asynctasq.config import Config, get_global_config
 from asynctasq.drivers import DriverType
 from asynctasq.drivers.base_driver import BaseDriver
 from asynctasq.serializers import BaseSerializer, MsgpackSerializer
+from asynctasq.tasks import TaskService
 
 from .driver_factory import DriverFactory
 from .events import EventEmitter, EventType, TaskEvent
-from .task_service import TaskService
 
 if TYPE_CHECKING:
-    from .task import Task
+    from asynctasq.tasks import BaseTask
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +42,7 @@ class Dispatcher:
         self._driver_cache: dict[str, BaseDriver] = {}  # Cache for driver overrides
         self._task_service = TaskService(serializer=self.serializer)
 
-    def _get_driver(self, task: "Task") -> BaseDriver:
+    def _get_driver(self, task: "BaseTask") -> BaseDriver:
         """Get the appropriate driver for this task.
 
         Resolution order:
@@ -76,14 +76,14 @@ class Dispatcher:
 
     async def dispatch(
         self,
-        task: "Task",
+        task: "BaseTask",
         queue: str | None = None,
         delay: int | None = None,
     ) -> str:
         """Dispatch a task to the queue.
 
         Args:
-            task: Task instance to dispatch
+            task: BaseTask instance to dispatch
             queue: Queue name (overrides task.queue if set)
             delay: Delay in seconds (overrides task._delay_seconds if set)
 

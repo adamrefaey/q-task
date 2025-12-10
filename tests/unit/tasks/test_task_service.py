@@ -16,15 +16,13 @@ from unittest.mock import AsyncMock, MagicMock
 from pytest import main, mark, raises
 
 from asynctasq.core.models import TaskInfo
-from asynctasq.core.task import FunctionTask, Task
-from asynctasq.core.task_service import TaskService
 from asynctasq.drivers.base_driver import BaseDriver
-from asynctasq.serializers.base_serializer import BaseSerializer
-from asynctasq.serializers.msgpack_serializer import MsgpackSerializer
+from asynctasq.serializers import BaseSerializer, MsgpackSerializer
+from asynctasq.tasks import BaseTask, FunctionTask, TaskService
 
 
 # Test implementations for abstract Task
-class ConcreteTask(Task[str]):
+class ConcreteTask(BaseTask[str]):
     """Concrete implementation of Task for testing."""
 
     def __init__(self, **kwargs: Any) -> None:
@@ -36,7 +34,7 @@ class ConcreteTask(Task[str]):
         return "success"
 
 
-class FailingTask(Task[str]):
+class FailingTask(BaseTask[str]):
     """Task that always fails for testing retry logic."""
 
     def __init__(self, **kwargs: Any) -> None:

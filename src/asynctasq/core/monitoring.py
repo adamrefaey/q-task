@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from asynctasq.core.models import QueueStats, TaskInfo, WorkerInfo
-from asynctasq.core.task_service import TaskService
+from asynctasq.tasks import TaskService
 
 if TYPE_CHECKING:
     from asynctasq.drivers.base_driver import BaseDriver

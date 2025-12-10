@@ -2,8 +2,8 @@
 Task service that handles task serialization, deserialization, and query operations.
 
 This service centralizes all task-related operations:
-- Serialization: Task instance -> bytes (for queueing)
-- Deserialization: bytes -> Task instance (for execution)
+- Serialization: BaseTask instance -> bytes (for queueing)
+- Deserialization: bytes -> BaseTask instance (for execution)
 - Task execution: execute with timeout, retry logic
 - Task info parsing: bytes -> TaskInfo model (for monitoring)
 - Task queries: get, list, retry, delete operations
@@ -23,8 +23,9 @@ from asynctasq.serializers.base_serializer import BaseSerializer
 from asynctasq.serializers.msgpack_serializer import MsgpackSerializer
 
 if TYPE_CHECKING:
-    from asynctasq.core.task import Task
     from asynctasq.drivers.base_driver import BaseDriver
+
+    from .base_task import BaseTask
 
 logger = logging.getLogger(__name__)
 
@@ -37,8 +38,8 @@ class TaskService:
 
     ## Core Operations
 
-    - **Serialization**: Task instance → bytes (for queueing)
-    - **Deserialization**: bytes → Task instance (for execution)
+    - **Serialization**: BaseTask instance → bytes (for queueing)
+    - **Deserialization**: bytes → BaseTask instance (for execution)
     - **Execution**: Run task.handle() with timeout support
     - **Monitoring**: Parse bytes → TaskInfo models
     - **Persistence**: Query/mutate tasks in driver
@@ -75,7 +76,7 @@ class TaskService:
     # Serialization (Task -> bytes)
     # =========================================================================
 
-    def serialize_task(self, task: "Task") -> bytes:
+    def serialize_task(self, task: "BaseTask") -> bytes:
         """
         Serialize a task instance to bytes for queue storage.
 
@@ -86,7 +87,7 @@ class TaskService:
         - Task configuration (queue, max_retries, etc.)
 
         Args:
-            task: Task instance to serialize
+            task: BaseTask instance to serialize
 
         Returns:
             bytes: Serialized task data
@@ -135,10 +136,10 @@ class TaskService:
         return self.serializer.serialize(task_data)
 
     # =========================================================================
-    # Deserialization (bytes -> Task instance)
+    # Deserialization (bytes -> BaseTask instance)
     # =========================================================================
 
-    async def deserialize_task(self, task_data: bytes) -> "Task":
+    async def deserialize_task(self, task_data: bytes) -> "BaseTask":
         """
         Deserialize task from bytes and reconstruct the task instance.
 
@@ -203,7 +204,7 @@ class TaskService:
 
         return task
 
-    def _reconstruct_function_task(self, task: "Task", metadata: dict[str, Any]) -> None:
+    def _reconstruct_function_task(self, task: "BaseTask", metadata: dict[str, Any]) -> None:
         """
         Reconstruct the function reference for a FunctionTask.
 
@@ -248,12 +249,12 @@ class TaskService:
     # Task Execution
     # =========================================================================
 
-    async def execute_task(self, task: "Task") -> None:
+    async def execute_task(self, task: "BaseTask") -> None:
         """
         Execute a task's handle() method with optional timeout.
 
         Args:
-            task: Task instance to execute
+            task: BaseTask instance to execute
 
         Raises:
             TimeoutError: If task exceeds configured timeout
@@ -264,7 +265,7 @@ class TaskService:
         else:
             await task.handle()
 
-    def should_retry(self, task: "Task", exception: Exception) -> bool:
+    def should_retry(self, task: "BaseTask", exception: Exception) -> bool:
         """
         Determine if a task should be retried after failure.
 
@@ -281,7 +282,7 @@ class TaskService:
         """
         return task._attempts < task.max_retries and task.should_retry(exception)
 
-    def prepare_for_retry(self, task: "Task") -> bytes:
+    def prepare_for_retry(self, task: "BaseTask") -> bytes:
         """
         Prepare a task for retry by incrementing attempts and serializing.
 
@@ -298,7 +299,7 @@ class TaskService:
         task._attempts += 1
         return self.serialize_task(task)
 
-    async def handle_task_failed(self, task: "Task", exception: Exception) -> None:
+    async def handle_task_failed(self, task: "BaseTask", exception: Exception) -> None:
         """
         Call the task's failed() hook for permanent failures.
 
@@ -625,6 +626,6 @@ class TaskService:
                 return None
         return None
 
-    def _is_function_task(self, task: "Task") -> bool:
+    def _is_function_task(self, task: "BaseTask") -> bool:
         """Check if task is a FunctionTask without importing it."""
         return task.__class__.__name__ == "FunctionTask"

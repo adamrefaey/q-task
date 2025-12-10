@@ -17,13 +17,13 @@ from pytest import main, mark
 
 from asynctasq.config import Config
 from asynctasq.core.dispatcher import Dispatcher, cleanup, get_dispatcher
-from asynctasq.core.task import FunctionTask, Task
 from asynctasq.drivers.base_driver import BaseDriver
 from asynctasq.serializers import BaseSerializer, MsgpackSerializer
+from asynctasq.tasks import BaseTask, FunctionTask
 
 
 # Test implementations for abstract Task
-class ConcreteTask(Task[str]):
+class ConcreteTask(BaseTask[str]):
     """Concrete implementation of Task for testing."""
 
     def __init__(self, **kwargs: Any) -> None:
@@ -643,7 +643,7 @@ class TestDispatcherSerializeTask:
         mock_func.__module__ = "__main__"
 
         # Make inspect.getfile raise an error
-        with patch("asynctasq.core.task_service.inspect.getfile") as mock_getfile:
+        with patch("asynctasq.tasks.task_service.inspect.getfile") as mock_getfile:
             mock_getfile.side_effect = OSError("Cannot get file path")
 
             task = FunctionTask(mock_func)
@@ -673,7 +673,7 @@ class TestDispatcherSerializeTask:
         mock_func.__module__ = "__main__"
 
         # Make inspect.getfile raise TypeError
-        with patch("asynctasq.core.task_service.inspect.getfile") as mock_getfile:
+        with patch("asynctasq.tasks.task_service.inspect.getfile") as mock_getfile:
             mock_getfile.side_effect = TypeError("Cannot get file path")
 
             task = FunctionTask(mock_func)

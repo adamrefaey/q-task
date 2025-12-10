@@ -42,7 +42,7 @@ Example:
 
     # Dispatch task
     task_id = await HeavyCPUTask(n=10000).dispatch()
-""" 
+"""
 
 from __future__ import annotations
 
@@ -53,12 +53,12 @@ import logging
 import os
 from typing import Any
 
-from .task import Task
+from .base_task import BaseTask
 
 logger = logging.getLogger(__name__)
 
 
-class ProcessTask[T](Task[T]):
+class ProcessTask[T](BaseTask[T]):
     """Base class for CPU-bound tasks requiring true multiprocessing.
 
     ProcessTask uses ProcessPoolExecutor to execute tasks in separate processes,
