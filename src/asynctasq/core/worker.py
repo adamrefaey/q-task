@@ -370,7 +370,7 @@ class Worker:
             else:
                 # ValueError/TypeError during task execution - handle as task failure
                 logger.exception(f"Task {task._task_id} failed: {e}")
-                await self._handle_task_failure(task, e, queue_name, start_time)
+                await self._handle_task_failure(task, e, queue_name, start_time, task_data)
 
         except TimeoutError as e:
             if task is None:
@@ -385,7 +385,7 @@ class Worker:
                 # TimeoutError during task execution - handle as task failure
                 logger.error(f"Task {task._task_id} timed out")
                 await self._handle_task_failure(
-                    task, TimeoutError("Task exceeded timeout"), queue_name, start_time
+                    task, TimeoutError("Task exceeded timeout"), queue_name, start_time, task_data
                 )
 
         except Exception as e:
@@ -399,13 +399,18 @@ class Worker:
                 await self.queue_driver.enqueue(queue_name, task_data, delay_seconds=60)
             else:
                 logger.exception(f"Task {task._task_id} failed: {e}")
-                await self._handle_task_failure(task, e, queue_name, start_time)
+                await self._handle_task_failure(task, e, queue_name, start_time, task_data)
 
         # Note: Python 3.11+ ExceptionGroup can be used to collect
         # multiple errors if task spawns subtasks
 
     async def _handle_task_failure(
-        self, task: BaseTask, exception: Exception, queue_name: str, start_time: datetime
+        self,
+        task: BaseTask,
+        exception: Exception,
+        queue_name: str,
+        start_time: datetime,
+        task_data: bytes,
     ) -> None:
         """Handle task failure with intelligent retry logic.
 
@@ -420,6 +425,7 @@ class Worker:
             exception: Exception that caused the failure
             queue_name: Name of the queue the task came from
             start_time: When task processing started
+            task_data: Original serialized task data (receipt handle)
         """
         duration_ms = int((datetime.now(UTC) - start_time).total_seconds() * 1000)
         task_id = task._task_id or "unknown"  # Fallback for type safety
@@ -445,7 +451,17 @@ class Worker:
                     )
                 )
 
-            # Re-enqueue with delay
+            # Remove old task from processing list before re-enqueuing
+            # Use ack() to clean up the old task data
+            try:
+                await self.queue_driver.ack(queue_name, task_data)
+            except Exception as ack_error:
+                logger.error(
+                    f"Failed to cleanup task {task_id} before retry from queue '{queue_name}': "
+                    f"{ack_error}"
+                )
+
+            # Re-enqueue with delay (this creates a NEW task with updated attempt count)
             await self.queue_driver.enqueue(
                 task.queue, serialized_task, delay_seconds=task.retry_delay
             )
@@ -472,6 +488,22 @@ class Worker:
 
             # Call task's failed() hook via TaskService
             await self._task_service.handle_task_failed(task, exception)
+
+            # Remove task from processing and mark as failed
+            # Use mark_failed() if available (Redis), otherwise use ack() for cleanup
+            try:
+                if hasattr(self.queue_driver, "mark_failed"):
+                    await self.queue_driver.mark_failed(queue_name, task_data)  # type: ignore
+                else:
+                    # Fallback: use ack() to at least remove from processing list
+                    await self.queue_driver.ack(queue_name, task_data)
+            except Exception as cleanup_error:
+                logger.error(
+                    f"Failed to cleanup permanently failed task {task_id} from queue '{queue_name}': "
+                    f"{cleanup_error}"
+                )
+
+            self._tasks_processed += 1
 
     async def _deserialize_task(self, task_data: bytes) -> BaseTask:
         """Deserialize task from bytes and reconstruct instance.

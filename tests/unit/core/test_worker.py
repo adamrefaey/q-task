@@ -919,7 +919,9 @@ class TestWorkerHandleTaskFailure:
 
         with patch.object(worker._task_service, "serialize_task", return_value=b"serialized"):
             # Act
-            await worker._handle_task_failure(task, exception, "test_queue", start_time)
+            await worker._handle_task_failure(
+                task, exception, "test_queue", start_time, b"task_data"
+            )
 
         # Assert
         assert task._attempts == 1
@@ -941,7 +943,7 @@ class TestWorkerHandleTaskFailure:
         task.failed = AsyncMock()  # type: ignore[assignment]
 
         # Act
-        await worker._handle_task_failure(task, exception, "test_queue", start_time)
+        await worker._handle_task_failure(task, exception, "test_queue", start_time, b"task_data")
 
         # Assert
         assert task._attempts == 3
@@ -969,7 +971,7 @@ class TestWorkerHandleTaskFailure:
         task.failed = AsyncMock()  # type: ignore[assignment]
 
         # Act
-        await worker._handle_task_failure(task, exception, "test_queue", start_time)
+        await worker._handle_task_failure(task, exception, "test_queue", start_time, b"task_data")
 
         # Assert
         assert task._attempts == 1
@@ -992,7 +994,7 @@ class TestWorkerHandleTaskFailure:
         task.failed = AsyncMock()  # type: ignore[assignment]
 
         # Act
-        await worker._handle_task_failure(task, exception, "test_queue", start_time)
+        await worker._handle_task_failure(task, exception, "test_queue", start_time, b"task_data")
 
         # Assert
         task.failed.assert_called_once_with(exception)
@@ -1016,7 +1018,7 @@ class TestWorkerHandleTaskFailure:
         task.failed = failing_failed_handler  # type: ignore[assignment]
 
         # Act - should not raise
-        await worker._handle_task_failure(task, exception, "test_queue", start_time)
+        await worker._handle_task_failure(task, exception, "test_queue", start_time, b"task_data")
 
         # Assert
         # Exception should be caught and logged, not raised
@@ -1048,7 +1050,9 @@ class TestWorkerHandleTaskFailure:
             # Act & Assert
             # Exception should propagate (not caught in current implementation)
             with raises(ValueError, match="Serialization failed"):
-                await worker._handle_task_failure(task, exception, "test_queue", start_time)
+                await worker._handle_task_failure(
+                    task, exception, "test_queue", start_time, b"task_data"
+                )
 
     @mark.asyncio
     async def test_handle_task_failure_handles_enqueue_exception_during_retry(self) -> None:
@@ -1072,7 +1076,9 @@ class TestWorkerHandleTaskFailure:
             # Act & Assert
             # Exception should propagate (not caught in current implementation)
             with raises(RuntimeError, match="Enqueue failed"):
-                await worker._handle_task_failure(task, exception, "test_queue", start_time)
+                await worker._handle_task_failure(
+                    task, exception, "test_queue", start_time, b"task_data"
+                )
 
 
 @mark.unit
@@ -2104,7 +2110,9 @@ class TestWorkerEventEmission:
 
         with patch.object(worker._task_service, "serialize_task", return_value=b"serialized"):
             # Act
-            await worker._handle_task_failure(task, exception, "test_queue", start_time)
+            await worker._handle_task_failure(
+                task, exception, "test_queue", start_time, b"task_data"
+            )
 
         # Assert
         emit_calls = mock_emitter.emit_task_event.call_args_list
@@ -2129,7 +2137,7 @@ class TestWorkerEventEmission:
         task.failed = AsyncMock()  # type: ignore[assignment]
 
         # Act
-        await worker._handle_task_failure(task, exception, "test_queue", start_time)
+        await worker._handle_task_failure(task, exception, "test_queue", start_time, b"task_data")
 
         # Assert
         emit_calls = mock_emitter.emit_task_event.call_args_list

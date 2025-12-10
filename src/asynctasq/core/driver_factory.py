@@ -57,6 +57,7 @@ class DriverFactory:
             rabbitmq_url=config.rabbitmq_url,
             rabbitmq_exchange_name=config.rabbitmq_exchange_name,
             rabbitmq_prefetch_count=config.rabbitmq_prefetch_count,
+            keep_completed_tasks=config.keep_completed_tasks,
         )
 
     @staticmethod
@@ -83,6 +84,7 @@ class DriverFactory:
                     password=kwargs.get("redis_password"),
                     db=kwargs.get("redis_db", 0),
                     max_connections=kwargs.get("redis_max_connections", 10),
+                    keep_completed_tasks=kwargs.get("keep_completed_tasks", False),
                 )
             case "sqs":
                 from asynctasq.drivers.sqs_driver import SQSDriver
@@ -107,6 +109,7 @@ class DriverFactory:
                     ),
                     min_pool_size=kwargs.get("postgres_min_pool_size", 10),
                     max_pool_size=kwargs.get("postgres_max_pool_size", 10),
+                    keep_completed_tasks=kwargs.get("keep_completed_tasks", False),
                 )
             case "mysql":
                 from asynctasq.drivers.mysql_driver import MySQLDriver
@@ -120,6 +123,7 @@ class DriverFactory:
                     visibility_timeout_seconds=kwargs.get("mysql_visibility_timeout_seconds", 300),
                     min_pool_size=kwargs.get("mysql_min_pool_size", 10),
                     max_pool_size=kwargs.get("mysql_max_pool_size", 10),
+                    keep_completed_tasks=kwargs.get("keep_completed_tasks", False),
                 )
             case "rabbitmq":
                 from asynctasq.drivers.rabbitmq_driver import RabbitMQDriver
@@ -128,6 +132,7 @@ class DriverFactory:
                     url=kwargs.get("rabbitmq_url", "amqp://guest:guest@localhost:5672/"),
                     exchange_name=kwargs.get("rabbitmq_exchange_name", "asynctasq"),
                     prefetch_count=kwargs.get("rabbitmq_prefetch_count", 1),
+                    keep_completed_tasks=kwargs.get("keep_completed_tasks", False),
                 )
             case _:
                 raise ValueError(

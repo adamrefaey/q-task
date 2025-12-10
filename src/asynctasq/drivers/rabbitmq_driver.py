@@ -75,10 +75,14 @@ class RabbitMQDriver(BaseDriver):
     exchange_name: str = "asynctasq"
     prefetch_count: int = 1
     management_url: str | None = None  # Optional: http://guest:guest@localhost:15672
+    keep_completed_tasks: bool = False
     connection: AbstractRobustConnection | None = field(default=None, init=False, repr=False)
     channel: AbstractChannel | None = field(default=None, init=False, repr=False)
     _queues: dict[str, AbstractQueue] = field(default_factory=dict, init=False, repr=False)
     _delayed_queues: dict[str, AbstractQueue] = field(default_factory=dict, init=False, repr=False)
+    _completed_queues: dict[str, AbstractQueue] = field(
+        default_factory=dict, init=False, repr=False
+    )
     _delayed_exchange: AbstractExchange | None = field(default=None, init=False, repr=False)
     _receipt_handles: dict[bytes, AbstractIncomingMessage] = field(
         default_factory=dict, init=False, repr=False
@@ -131,6 +135,7 @@ class RabbitMQDriver(BaseDriver):
 
         self._queues.clear()
         self._delayed_queues.clear()
+        self._completed_queues.clear()
         self._delayed_exchange = None
         self._receipt_handles.clear()
         self._in_flight_per_queue.clear()
@@ -248,6 +253,44 @@ class RabbitMQDriver(BaseDriver):
 
         self._delayed_queues[delayed_queue_name] = delayed_queue
         return delayed_queue
+
+    async def _ensure_completed_queue(self, queue_name: str) -> AbstractQueue:
+        """Ensure completed queue exists for storing completed task history.
+
+        Args:
+            queue_name: Name of the completed queue (typically "{queue_name}_completed")
+
+        Returns:
+            AbstractQueue instance for the completed queue
+
+        Implementation:
+            - Creates completed queue for storing completed tasks
+            - Checks cache first (_completed_queues dict) for performance
+            - Creates queue if not cached (durable, not auto-delete)
+            - Binds queue to exchange for routing
+            - Caches queue for subsequent operations
+            - Auto-connects if channel not initialized
+        """
+        if queue_name in self._completed_queues:
+            return self._completed_queues[queue_name]
+
+        if self.channel is None:
+            await self.connect()
+            assert self.channel is not None
+            assert self._delayed_exchange is not None
+
+        # Declare completed queue (durable, not auto-delete)
+        completed_queue = await self.channel.declare_queue(
+            queue_name, durable=True, auto_delete=False
+        )
+
+        # Bind queue to exchange with routing_key = queue_name
+        exchange = self._delayed_exchange
+        assert exchange is not None
+        await completed_queue.bind(exchange, routing_key=queue_name)
+
+        self._completed_queues[queue_name] = completed_queue
+        return completed_queue
 
     async def enqueue(self, queue_name: str, task_data: bytes, delay_seconds: int = 0) -> None:
         """Add task to queue with optional delay.
@@ -392,12 +435,13 @@ class RabbitMQDriver(BaseDriver):
         """Acknowledge successful task processing.
 
         Args:
-            queue_name: Name of the queue (unused but required by protocol)
+            queue_name: Name of the queue
             receipt_handle: Task data bytes from dequeue (used as key in _receipt_handles)
 
         Implementation:
             - Looks up message in _receipt_handles dict using receipt_handle as key
             - If message found: acknowledges it (removes from queue)
+            - If keep_completed_tasks is True: publishes task to completed queue before ack
             - Removes receipt_handle from dict after ack
             - Idempotent: safe to call multiple times (no-op if handle not found)
             - Prevents duplicate processing by removing message from queue
@@ -405,6 +449,20 @@ class RabbitMQDriver(BaseDriver):
         message = self._receipt_handles.get(receipt_handle)
 
         if message is not None:
+            # Optionally keep completed tasks for history
+            if self.keep_completed_tasks:
+                completed_queue_name = f"{queue_name}_completed"
+                await self._ensure_completed_queue(completed_queue_name)
+
+                if self.channel is not None and self._delayed_exchange is not None:
+                    completed_message = aio_pika.Message(
+                        body=receipt_handle,
+                        delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
+                    )
+                    await self._delayed_exchange.publish(
+                        completed_message, routing_key=completed_queue_name
+                    )
+
             await message.ack()
             self._receipt_handles.pop(receipt_handle, None)
             # Decrement in-flight counter
@@ -433,6 +491,38 @@ class RabbitMQDriver(BaseDriver):
         if message is not None:
             # Reject and requeue
             await message.nack(requeue=True)
+            self._receipt_handles.pop(receipt_handle, None)
+            # Decrement in-flight counter
+            if queue_name in self._in_flight_per_queue:
+                self._in_flight_per_queue[queue_name] = max(
+                    0, self._in_flight_per_queue[queue_name] - 1
+                )
+
+    async def mark_failed(self, queue_name: str, receipt_handle: bytes) -> None:
+        """Mark task as permanently failed (acknowledge without requeue).
+
+        Args:
+            queue_name: Name of the queue
+            receipt_handle: Task data bytes from dequeue (used as key in _receipt_handles)
+
+        Implementation:
+            - Looks up message in _receipt_handles dict using receipt_handle as key
+            - If message found: acknowledges it (removes from queue without requeue)
+            - Removes receipt_handle from dict after ack
+            - Idempotent: safe to call multiple times (no-op if handle not found)
+            - RabbitMQ doesn't have built-in failed task tracking, so this just removes
+              the message from the queue. For DLQ support, configure dead-letter exchanges
+              at the RabbitMQ queue level.
+
+        Note:
+            For proper failed task tracking, configure a dead-letter exchange in RabbitMQ.
+            This method simply acknowledges the message to remove it from the queue.
+        """
+        message = self._receipt_handles.get(receipt_handle)
+
+        if message is not None:
+            # Acknowledge (remove from queue without requeue)
+            await message.ack()
             self._receipt_handles.pop(receipt_handle, None)
             # Decrement in-flight counter
             if queue_name in self._in_flight_per_queue:

@@ -257,6 +257,40 @@ class SQSDriver(BaseDriver):
         # Clean up receipt handle from cache (it will get new handle on next receive)
         self._receipt_handles.pop(receipt_handle, None)
 
+    async def mark_failed(self, queue_name: str, receipt_handle: bytes) -> None:
+        """Mark task as permanently failed (delete from queue).
+
+        Args:
+            queue_name: Name of the queue
+            receipt_handle: Task data (as bytes) from dequeue()
+
+        Implementation:
+            SQS doesn't have a separate failed queue mechanism in this driver.
+            This method deletes the message from the queue, effectively marking it as failed.
+            For dead-letter queue support, configure DLQ at the SQS queue level.
+
+        Note:
+            Idempotent - safe to call multiple times.
+            Cleans up receipt handle from cache.
+        """
+        if self.client is None:
+            await self.connect()
+            assert self.client is not None
+
+        # Retrieve actual SQS receipt handle from cache
+        sqs_receipt_handle = self._receipt_handles.get(receipt_handle)
+
+        if sqs_receipt_handle is None:
+            # Receipt handle not found - message may have been already processed or timed out
+            # This is not an error - mark_failed is idempotent
+            return
+
+        queue_url = await self._get_queue_url(queue_name)
+        await self.client.delete_message(QueueUrl=queue_url, ReceiptHandle=sqs_receipt_handle)
+
+        # Clean up receipt handle from cache
+        self._receipt_handles.pop(receipt_handle, None)
+
     async def get_queue_size(
         self,
         queue_name: str,

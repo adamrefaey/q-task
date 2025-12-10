@@ -48,6 +48,7 @@ class TestDriverFactoryCreateFromConfig:
             password="secret123",
             db=5,
             max_connections=20,
+            keep_completed_tasks=False,
         )
         assert result == mock_instance
 
@@ -106,6 +107,7 @@ class TestDriverFactoryCreateFromConfig:
             visibility_timeout_seconds=600,
             min_pool_size=5,
             max_pool_size=20,
+            keep_completed_tasks=False,
         )
         assert result == mock_instance
 
@@ -139,6 +141,7 @@ class TestDriverFactoryCreateFromConfig:
             visibility_timeout_seconds=600,
             min_pool_size=5,
             max_pool_size=20,
+            keep_completed_tasks=False,
         )
         assert result == mock_instance
 
@@ -243,6 +246,7 @@ class TestDriverFactoryCreate:
             password=None,
             db=0,
             max_connections=10,
+            keep_completed_tasks=False,
         )
         assert result == mock_instance
 
@@ -267,6 +271,7 @@ class TestDriverFactoryCreate:
             password="custom_pass",
             db=3,
             max_connections=50,
+            keep_completed_tasks=False,
         )
         assert result == mock_instance
 
@@ -331,6 +336,7 @@ class TestDriverFactoryCreate:
             visibility_timeout_seconds=300,
             min_pool_size=10,
             max_pool_size=10,
+            keep_completed_tasks=False,
         )
         assert result == mock_instance
 
@@ -363,6 +369,7 @@ class TestDriverFactoryCreate:
             visibility_timeout_seconds=1800,
             min_pool_size=20,
             max_pool_size=100,
+            keep_completed_tasks=False,
         )
         assert result == mock_instance
 
@@ -385,6 +392,7 @@ class TestDriverFactoryCreate:
             visibility_timeout_seconds=300,
             min_pool_size=10,
             max_pool_size=10,
+            keep_completed_tasks=False,
         )
         assert result == mock_instance
 
@@ -417,6 +425,7 @@ class TestDriverFactoryCreate:
             visibility_timeout_seconds=1800,
             min_pool_size=20,
             max_pool_size=100,
+            keep_completed_tasks=False,
         )
         assert result == mock_instance
 
@@ -468,6 +477,7 @@ class TestDriverFactoryParameterPassing:
             password=None,  # Default
             db=7,
             max_connections=10,  # Default
+            keep_completed_tasks=False,
         )
         assert result == mock_instance
 
@@ -515,6 +525,7 @@ class TestDriverFactoryParameterPassing:
             visibility_timeout_seconds=300,  # Default
             min_pool_size=10,  # Default
             max_pool_size=10,  # Default
+            keep_completed_tasks=False,
         )
         assert result == mock_instance
 
@@ -540,6 +551,7 @@ class TestDriverFactoryParameterPassing:
             visibility_timeout_seconds=300,  # Default
             min_pool_size=10,  # Default
             max_pool_size=10,  # Default
+            keep_completed_tasks=False,
         )
         assert result == mock_instance
 
@@ -592,6 +604,7 @@ class TestDriverFactoryConfigIntegration:
             visibility_timeout_seconds=900,
             min_pool_size=15,
             max_pool_size=50,
+            keep_completed_tasks=False,
         )
         assert result == mock_instance
 
@@ -642,6 +655,7 @@ class TestDriverFactoryConfigIntegration:
             password="super_secret_password",
             db=15,
             max_connections=100,
+            keep_completed_tasks=False,
         )
         assert result == mock_instance
 
@@ -675,6 +689,7 @@ class TestDriverFactoryConfigIntegration:
             visibility_timeout_seconds=900,
             min_pool_size=15,
             max_pool_size=50,
+            keep_completed_tasks=False,
         )
         assert result == mock_instance
 
@@ -701,6 +716,7 @@ class TestDriverFactoryEdgeCases:
             password=None,
             db=0,
             max_connections=10,
+            keep_completed_tasks=False,
         )
         assert result == mock_instance
 
@@ -785,6 +801,7 @@ class TestDriverFactoryEdgeCases:
             password=None,
             db=0,
             max_connections=10,
+            keep_completed_tasks=False,
         )
         assert result == mock_instance
 
@@ -813,6 +830,7 @@ class TestDriverFactoryEdgeCases:
             visibility_timeout_seconds=300,
             min_pool_size=10,
             max_pool_size=10,
+            keep_completed_tasks=False,
         )
         assert result == mock_instance
 

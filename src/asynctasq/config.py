@@ -76,8 +76,12 @@ ENV_VAR_MAPPING: dict[str, tuple[str, Any, Callable[[str], Any]]] = {
     # ProcessTask/ProcessPoolExecutor configuration
     "process_pool_size": ("ASYNCTASQ_PROCESS_POOL_SIZE", None, int),
     "process_pool_max_tasks_per_child": ("ASYNCTASQ_PROCESS_POOL_MAX_TASKS_PER_CHILD", None, int),
-    "process_pool_size": ("asynctasq_PROCESS_POOL_SIZE", None, int),
-    "process_pool_max_tasks_per_child": ("asynctasq_PROCESS_POOL_MAX_TASKS_PER_CHILD", None, int),
+    # Task retention configuration
+    "keep_completed_tasks": (
+        "ASYNCTASQ_KEEP_COMPLETED_TASKS",
+        "False",
+        lambda x: x.lower() in ("true", "1", "yes"),
+    ),
 }
 
 
@@ -142,6 +146,12 @@ class Config:
     # If None, worker processes live until pool shutdown (no recycling)
     # Recommended: 100-1000 to prevent memory leaks (Python 3.11+)
     process_pool_max_tasks_per_child: int | None = None
+
+    # Task retention configuration
+    # If False (default), completed tasks are deleted/removed after acknowledgment
+    # If True, completed tasks are kept for history/audit purposes
+    # Note: Not applicable for SQS driver (SQS always deletes acknowledged messages)
+    keep_completed_tasks: bool = False
 
     @staticmethod
     def from_env(**overrides) -> "Config":
@@ -412,6 +422,11 @@ def set_global_config(**overrides) -> None:
             default_max_retries=5,
             default_retry_delay=120,
             default_timeout=300
+        )
+
+        # Task retention (keep completed tasks for history)
+        set_global_config(
+            keep_completed_tasks=True  # Keep completed tasks (default: False)
         )
 
     Note:

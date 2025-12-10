@@ -59,6 +59,7 @@ class RedisDriver(BaseDriver):
     password: str | None = None
     db: int = 0
     max_connections: int = 10
+    keep_completed_tasks: bool = False
     client: Redis | None = field(default=None, init=False, repr=False)
 
     async def connect(self) -> None:
@@ -155,16 +156,32 @@ class RedisDriver(BaseDriver):
             receipt_handle: Task data from dequeue
 
         Implementation:
-            Uses LREM to remove task from processing list. Idempotent operation.
+            Uses LREM to remove task from processing list and increments completed counter.
+            If keep_completed_tasks is True, stores task in completed list for history.
+            Idempotent operation.
         """
         if self.client is None:
             await self.connect()
             assert self.client is not None
 
         processing_key = f"queue:{queue_name}:processing"
+        completed_key = f"queue:{queue_name}:stats:completed"
+
         # Remove task from processing list (count=1 removes first occurrence)
         # redis-py's lrem type stub expects str, but runtime accepts bytes (see maybe_await docs)
-        await maybe_await(self.client.lrem(processing_key, 1, receipt_handle))  # type: ignore[arg-type]
+        removed_count: int = await maybe_await(
+            self.client.lrem(processing_key, 1, receipt_handle)  # type: ignore[arg-type]
+        )
+
+        # Only increment completed counter if task was actually removed
+        # This prevents double-counting if ack is called multiple times
+        if removed_count > 0:
+            await maybe_await(self.client.incr(completed_key))
+
+            # Optionally keep completed tasks for history
+            if self.keep_completed_tasks:
+                completed_list_key = f"queue:{queue_name}:completed"
+                await maybe_await(self.client.lpush(completed_list_key, receipt_handle))
 
     async def nack(self, queue_name: str, receipt_handle: bytes) -> None:
         """Reject task and re-queue for immediate retry.
@@ -196,6 +213,34 @@ class RedisDriver(BaseDriver):
         # This prevents nack-after-ack from re-adding already completed tasks
         if removed_count > 0:
             await maybe_await(self.client.lpush(main_key, receipt_handle))
+
+    async def mark_failed(self, queue_name: str, receipt_handle: bytes) -> None:
+        """Mark task as permanently failed (remove from processing list and increment failed counter).
+
+        Args:
+            queue_name: Name of the queue
+            receipt_handle: Task data from dequeue
+
+        Implementation:
+            Removes task from processing list and increments failed counter.
+            Should be called when a task fails permanently (no more retries).
+        """
+        if self.client is None:
+            await self.connect()
+            assert self.client is not None
+
+        processing_key = f"queue:{queue_name}:processing"
+        failed_key = f"queue:{queue_name}:stats:failed"
+
+        # Remove task from processing list
+        # redis-py's lrem type stub expects str, but runtime accepts bytes (see maybe_await docs)
+        removed_count: int = await maybe_await(
+            self.client.lrem(processing_key, 1, receipt_handle)  # type: ignore[arg-type]
+        )
+
+        # Only increment failed counter if task was actually removed
+        if removed_count > 0:
+            await maybe_await(self.client.incr(failed_key))
 
     async def get_queue_size(
         self,

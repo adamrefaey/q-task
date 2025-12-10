@@ -431,11 +431,12 @@ class TestRedisDriverAck:
     @patch("asynctasq.drivers.redis_driver.Redis")
     @mark.asyncio
     async def test_ack_removes_from_processing(self, mock_redis_class: MagicMock) -> None:
-        """Test ack removes task from processing list."""
+        """Test ack removes task from processing list and increments completed counter."""
         # Arrange
         mock_client = AsyncMock()
         mock_redis_class.from_url.return_value = mock_client
-        mock_client.lrem = AsyncMock(return_value=1)
+        mock_client.lrem = AsyncMock(return_value=1)  # Task was found and removed
+        mock_client.incr = AsyncMock(return_value=1)
         driver = RedisDriver()
         await driver.connect()
 
@@ -444,6 +445,7 @@ class TestRedisDriverAck:
 
         # Assert
         mock_client.lrem.assert_called_once_with("queue:default:processing", 1, b"task_data")
+        mock_client.incr.assert_called_once_with("queue:default:stats:completed")
 
     @patch("asynctasq.drivers.redis_driver.Redis")
     @mark.asyncio

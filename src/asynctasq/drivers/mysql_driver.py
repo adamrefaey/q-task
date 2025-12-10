@@ -41,6 +41,7 @@ class MySQLDriver(BaseDriver):
     visibility_timeout_seconds: int = 300  # 5 minutes
     min_pool_size: int = 10
     max_pool_size: int = 10
+    keep_completed_tasks: bool = False
     pool: Pool | None = field(default=None, init=False, repr=False)
     _receipt_handles: dict[bytes, int] = field(default_factory=dict, init=False, repr=False)
 
@@ -281,11 +282,15 @@ class MySQLDriver(BaseDriver):
                 return None
 
     async def ack(self, queue_name: str, receipt_handle: bytes) -> None:
-        """Acknowledge successful processing and delete task.
+        """Acknowledge successful processing and mark task as completed.
 
         Args:
             queue_name: Name of the queue (unused but required by protocol)
             receipt_handle: Receipt handle from dequeue (UUID bytes)
+
+        Implementation:
+            If keep_completed_tasks is True: Updates status to 'completed' to maintain task history.
+            If keep_completed_tasks is False: Deletes the task to save storage space.
         """
         if self.pool is None:
             await self.connect()
@@ -297,9 +302,16 @@ class MySQLDriver(BaseDriver):
                 await conn.begin()
                 try:
                     async with conn.cursor() as cursor:
-                        await cursor.execute(
-                            f"DELETE FROM {self.queue_table} WHERE id = %s", (task_id,)
-                        )
+                        if self.keep_completed_tasks:
+                            await cursor.execute(
+                                f"UPDATE {self.queue_table} SET status = 'completed', updated_at = NOW(6) WHERE id = %s",
+                                (task_id,),
+                            )
+                        else:
+                            await cursor.execute(
+                                f"DELETE FROM {self.queue_table} WHERE id = %s",
+                                (task_id,),
+                            )
                     await conn.commit()
                 except Exception:
                     await conn.rollback()
@@ -373,6 +385,61 @@ class MySQLDriver(BaseDriver):
                             await cursor.execute(
                                 f"DELETE FROM {self.queue_table} WHERE id = %s", (task_id,)
                             )
+                await conn.commit()
+            except Exception:
+                await conn.rollback()
+                raise
+
+        self._receipt_handles.pop(receipt_handle, None)
+
+    async def mark_failed(self, queue_name: str, receipt_handle: bytes) -> None:
+        """Mark task as permanently failed (move to dead letter queue).
+
+        Args:
+            queue_name: Name of the queue
+            receipt_handle: Receipt handle from dequeue (UUID bytes)
+
+        Implementation:
+            Moves task to dead_letter_queue and removes from main queue.
+            Should be called when a task fails permanently (no more retries).
+        """
+        if self.pool is None:
+            await self.connect()
+            assert self.pool is not None
+
+        task_id = self._receipt_handles.get(receipt_handle)
+        if not task_id:
+            return
+
+        async with self.pool.acquire() as conn:
+            await conn.begin()
+            try:
+                async with conn.cursor() as cursor:
+                    # Get task data
+                    await cursor.execute(
+                        f"SELECT queue_name, payload, attempts FROM {self.queue_table} WHERE id = %s",
+                        (task_id,),
+                    )
+                    row = await cursor.fetchone()
+
+                    if row:
+                        task_queue_name = row[0]
+                        payload = row[1]
+                        attempts = row[2]
+
+                        # Move to dead letter queue
+                        await cursor.execute(
+                            f"""
+                            INSERT INTO {self.dead_letter_table}
+                                (queue_name, payload, attempts, error_message, failed_at)
+                            VALUES (%s, %s, %s, 'Permanently failed', NOW(6))
+                            """,
+                            (task_queue_name, payload, attempts),
+                        )
+                        # Delete from main queue
+                        await cursor.execute(
+                            f"DELETE FROM {self.queue_table} WHERE id = %s", (task_id,)
+                        )
                 await conn.commit()
             except Exception:
                 await conn.rollback()
