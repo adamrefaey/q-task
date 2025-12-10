@@ -12,6 +12,7 @@ from asynctasq.serializers.base_serializer import BaseSerializer
 from asynctasq.serializers.msgpack_serializer import MsgpackSerializer
 
 from .events import EventEmitter, EventType, TaskEvent, WorkerEvent
+from .process_task import ProcessTask
 from .task import Task
 from .task_service import TaskService
 
@@ -72,6 +73,8 @@ class Worker:
         event_emitter: EventEmitter | None = None,
         worker_id: str | None = None,
         heartbeat_interval: float = 60.0,
+        process_pool_size: int | None = None,
+        process_pool_max_tasks_per_child: int | None = None,
     ) -> None:
         self.queue_driver = queue_driver
         self.queues = list(queues) if queues else ["default"]
@@ -82,6 +85,8 @@ class Worker:
         self.worker_id = worker_id or f"worker-{uuid.uuid4().hex[:8]}"
         self.hostname = socket.gethostname()
         self.heartbeat_interval = heartbeat_interval
+        self.process_pool_size = process_pool_size
+        self.process_pool_max_tasks_per_child = process_pool_max_tasks_per_child
 
         self._running = False
         self._tasks: set[asyncio.Task[None]] = set()
@@ -110,6 +115,18 @@ class Worker:
 
         # Ensure driver is connected
         await self.queue_driver.connect()
+
+        # Initialize ProcessTask pool if configured
+        if self.process_pool_size is not None or self.process_pool_max_tasks_per_child is not None:
+            logger.info(
+                "Initializing ProcessTask pool: size=%s, max_tasks_per_child=%s",
+                self.process_pool_size,
+                self.process_pool_max_tasks_per_child,
+            )
+            ProcessTask.initialize_pool(
+                max_workers=self.process_pool_size,
+                max_tasks_per_child=self.process_pool_max_tasks_per_child,
+            )
 
         # Setup signal handlers
         loop = asyncio.get_event_loop()
@@ -500,6 +517,10 @@ class Worker:
 
         if self._tasks:
             await asyncio.wait(self._tasks)
+
+        # Shutdown ProcessTask pool (graceful - wait for in-flight tasks)
+        logger.info("Shutting down ProcessTask pool...")
+        ProcessTask.shutdown_pool(wait=True)
 
         # Emit worker_offline event
         if self.event_emitter:

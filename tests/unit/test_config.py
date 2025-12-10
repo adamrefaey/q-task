@@ -98,6 +98,8 @@ class TestEnvVarMapping:
             "default_max_retries",
             "default_retry_delay",
             "default_timeout",
+            "process_pool_size",
+            "process_pool_max_tasks_per_child",
         }
 
         # Assert

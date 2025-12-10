@@ -73,6 +73,9 @@ ENV_VAR_MAPPING: dict[str, tuple[str, Any, Callable[[str], Any]]] = {
     "default_max_retries": ("asynctasq_MAX_RETRIES", "3", int),
     "default_retry_delay": ("asynctasq_RETRY_DELAY", "60", int),
     "default_timeout": ("asynctasq_TIMEOUT", None, int),
+    # ProcessTask/ProcessPoolExecutor configuration
+    "process_pool_size": ("asynctasq_PROCESS_POOL_SIZE", None, int),
+    "process_pool_max_tasks_per_child": ("asynctasq_PROCESS_POOL_MAX_TASKS_PER_CHILD", None, int),
 }
 
 
@@ -130,6 +133,13 @@ class Config:
     default_max_retries: int = 3
     default_retry_delay: int = 60
     default_timeout: int | None = None
+
+    # ProcessTask/ProcessPoolExecutor configuration
+    # If None, ProcessTask will auto-initialize using os.process_cpu_count() or 4
+    process_pool_size: int | None = None
+    # If None, worker processes live until pool shutdown (no recycling)
+    # Recommended: 100-1000 to prevent memory leaks (Python 3.11+)
+    process_pool_max_tasks_per_child: int | None = None
 
     @staticmethod
     def from_env(**overrides) -> "Config":
