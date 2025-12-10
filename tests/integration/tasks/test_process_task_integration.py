@@ -6,7 +6,6 @@ import os
 import pytest
 import pytest_asyncio
 
-from asynctasq.config import Config
 from asynctasq.core.dispatcher import Dispatcher
 from asynctasq.core.worker import Worker
 from asynctasq.drivers.redis_driver import RedisDriver
@@ -46,7 +45,7 @@ class CPUIntensiveTask(ProcessTask[dict]):
         import hashlib
 
         result = "0" * 64
-        for i in range(self.iterations):
+        for _ in range(self.iterations):
             result = hashlib.sha256(result.encode()).hexdigest()
 
         return {"hash": result, "iterations": self.iterations}
@@ -90,15 +89,15 @@ async def redis_driver():
     """Create and connect Redis driver."""
     driver = RedisDriver(url=REDIS_URL)
     await driver.connect()
-    
+
     # Clean test queue
     if driver.client:
         await driver.client.delete("asynctasq:queue:test-process")
         await driver.client.delete("asynctasq:processing:test-process")
         await driver.client.delete("asynctasq:delayed:test-process")
-    
+
     yield driver
-    
+
     # Cleanup
     if driver.client:
         await driver.client.delete("asynctasq:queue:test-process")
@@ -119,7 +118,7 @@ async def worker(redis_driver):
     """Create worker with process pool configured."""
     # Ensure process pool is initialized
     ProcessTask.shutdown_pool(wait=True)
-    
+
     worker = Worker(
         queue_driver=redis_driver,
         queues=["test-process"],
@@ -128,9 +127,9 @@ async def worker(redis_driver):
         process_pool_size=2,
         process_pool_max_tasks_per_child=10,
     )
-    
+
     yield worker
-    
+
     # Cleanup
     await worker._cleanup()
     ProcessTask.shutdown_pool(wait=True)
@@ -143,22 +142,24 @@ async def test_process_task_end_to_end_with_redis(dispatcher, worker):
     # Dispatch task
     task = FactorialTask(n=5)
     task_id = await dispatcher.dispatch(task)
-    
+
     assert task_id is not None
     assert task._task_id == task_id
-    
+
     # Start worker in background
     worker_task = asyncio.create_task(worker.start())
-    
+
     # Wait for worker to process the task
     await asyncio.sleep(2)
-    
+
     # Stop worker
     worker._running = False
     await worker_task
-    
+
     # Verify task was processed (queue should be empty)
-    queue_size = await worker.queue_driver.get_queue_size("test-process", include_delayed=False, include_in_flight=False)
+    queue_size = await worker.queue_driver.get_queue_size(
+        "test-process", include_delayed=False, include_in_flight=False
+    )
     assert queue_size == 0
 
 
@@ -172,28 +173,32 @@ async def test_process_task_multiple_concurrent_executions(dispatcher, worker):
         task = FactorialTask(n=n)
         task_id = await dispatcher.dispatch(task)
         task_ids.append(task_id)
-    
+
     assert len(task_ids) == 5
-    
+
     # Verify all queued
-    queue_size = await worker.queue_driver.get_queue_size("test-process", include_delayed=False, include_in_flight=False)
+    queue_size = await worker.queue_driver.get_queue_size(
+        "test-process", include_delayed=False, include_in_flight=False
+    )
     assert queue_size == 5
-    
+
     # Start worker with timeout
     worker.max_tasks = 5  # Process exactly 5 tasks then stop
     worker_task = asyncio.create_task(worker.start())
     try:
         await asyncio.wait_for(worker_task, timeout=15.0)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         worker._running = False
         worker_task.cancel()
         try:
             await worker_task
         except asyncio.CancelledError:
             pass
-    
+
     # Verify all processed
-    queue_size = await worker.queue_driver.get_queue_size("test-process", include_delayed=False, include_in_flight=False)
+    queue_size = await worker.queue_driver.get_queue_size(
+        "test-process", include_delayed=False, include_in_flight=False
+    )
     assert queue_size == 0
 
 
@@ -203,23 +208,25 @@ async def test_process_task_cpu_intensive_work(dispatcher, worker):
     """Test ProcessTask with actual CPU-intensive computation."""
     # Dispatch CPU-intensive task
     task = CPUIntensiveTask(iterations=1000)
-    task_id = await dispatcher.dispatch(task)
-    
+    await dispatcher.dispatch(task)
+
     # Process with worker with timeout
     worker.max_tasks = 1
     worker_task = asyncio.create_task(worker.start())
     try:
         await asyncio.wait_for(worker_task, timeout=10.0)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         worker._running = False
         worker_task.cancel()
         try:
             await worker_task
         except asyncio.CancelledError:
             pass
-    
+
     # Verify processed
-    queue_size = await worker.queue_driver.get_queue_size("test-process", include_delayed=False, include_in_flight=False)
+    queue_size = await worker.queue_driver.get_queue_size(
+        "test-process", include_delayed=False, include_in_flight=False
+    )
     assert queue_size == 0
 
 
@@ -234,23 +241,25 @@ async def test_process_task_attribute_serialization(dispatcher, worker):
         list_val=[1, 2, 3, 4, 5],
         dict_val={"a": 1, "b": 2, "c": 3},
     )
-    task_id = await dispatcher.dispatch(task)
-    
+    await dispatcher.dispatch(task)
+
     # Process with worker with timeout
     worker.max_tasks = 1
     worker_task = asyncio.create_task(worker.start())
     try:
         await asyncio.wait_for(worker_task, timeout=10.0)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         worker._running = False
         worker_task.cancel()
         try:
             await worker_task
         except asyncio.CancelledError:
             pass
-    
+
     # Verify processed
-    queue_size = await worker.queue_driver.get_queue_size("test-process", include_delayed=False, include_in_flight=False)
+    queue_size = await worker.queue_driver.get_queue_size(
+        "test-process", include_delayed=False, include_in_flight=False
+    )
     assert queue_size == 0
 
 
@@ -260,29 +269,31 @@ async def test_process_task_retry_on_failure(dispatcher, worker):
     """Test ProcessTask retry logic with failures."""
     # Dispatch failing task
     task = FailingTask(error_msg="Test error for retry")
-    task_id = await dispatcher.dispatch(task)
-    
+    await dispatcher.dispatch(task)
+
     # Start worker (will process and fail, then retry)
     worker.max_tasks = 2  # Process just a couple attempts
     worker_task = asyncio.create_task(worker.start())
-    
+
     # Wait for a couple processing attempts
     await asyncio.sleep(2)
-    
+
     # Stop worker gracefully
     worker._running = False
     try:
         await asyncio.wait_for(worker_task, timeout=5.0)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         worker_task.cancel()
         try:
             await worker_task
         except asyncio.CancelledError:
             pass
-    
+
     # Task should have been attempted (verify task system is working)
     # Note: With retry delays, task may still be in queue or delayed queue
-    queue_size = await worker.queue_driver.get_queue_size("test-process", include_delayed=True, include_in_flight=True)
+    queue_size = await worker.queue_driver.get_queue_size(
+        "test-process", include_delayed=True, include_in_flight=True
+    )
     assert queue_size >= 0  # Verify queue is accessible
 
 
@@ -292,40 +303,48 @@ async def test_process_task_with_delayed_execution(dispatcher, worker):
     """Test ProcessTask with delay parameter."""
     # Dispatch with 2 second delay
     task = FactorialTask(n=4)
-    task_id = await dispatcher.dispatch(task, delay=2)
+    await dispatcher.dispatch(task, delay=2)
 
     # Immediately check - should be in delayed queue
-    queue_size = await worker.queue_driver.get_queue_size("test-process", include_delayed=False, include_in_flight=False)
+    queue_size = await worker.queue_driver.get_queue_size(
+        "test-process", include_delayed=False, include_in_flight=False
+    )
     assert queue_size == 0
 
-    delayed_size = await worker.queue_driver.get_queue_size("test-process", include_delayed=True, include_in_flight=False)
+    delayed_size = await worker.queue_driver.get_queue_size(
+        "test-process", include_delayed=True, include_in_flight=False
+    )
     assert delayed_size >= 1  # At least our task is delayed
-    
+
     # Wait for delay to expire
     await asyncio.sleep(3)
 
     # Process delayed tasks (Redis driver does this in dequeue)
     await worker.queue_driver._process_delayed_tasks("test-process")
-    
+
     # Now should be available
-    queue_size = await worker.queue_driver.get_queue_size("test-process", include_delayed=False, include_in_flight=False)
+    queue_size = await worker.queue_driver.get_queue_size(
+        "test-process", include_delayed=False, include_in_flight=False
+    )
     assert queue_size >= 1
-    
+
     # Process with worker (with timeout to prevent hanging)
     worker.max_tasks = 1
     worker_task = asyncio.create_task(worker.start())
     try:
         await asyncio.wait_for(worker_task, timeout=5.0)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         worker._running = False
         worker_task.cancel()
         try:
             await worker_task
         except asyncio.CancelledError:
             pass
-    
+
     # Verify processed
-    queue_size = await worker.queue_driver.get_queue_size("test-process", include_delayed=False, include_in_flight=False)
+    queue_size = await worker.queue_driver.get_queue_size(
+        "test-process", include_delayed=False, include_in_flight=False
+    )
     assert queue_size == 0
 
 
@@ -336,7 +355,7 @@ async def test_process_pool_lifecycle_with_worker(redis_driver):
     # Ensure clean state
     ProcessTask.shutdown_pool(wait=True)
     assert ProcessTask._process_pool is None
-    
+
     # Create worker with process pool config
     worker = Worker(
         queue_driver=redis_driver,
@@ -344,25 +363,25 @@ async def test_process_pool_lifecycle_with_worker(redis_driver):
         process_pool_size=2,
         process_pool_max_tasks_per_child=5,
     )
-    
+
     # Connect driver and initialize pool
     await redis_driver.connect()
     await worker.queue_driver.connect()
-    
+
     # Initialize pool (normally done in worker.start())
     ProcessTask.initialize_pool(
         max_workers=worker.process_pool_size,
         max_tasks_per_child=worker.process_pool_max_tasks_per_child,
     )
-    
+
     # Verify pool initialized
     assert ProcessTask._process_pool is not None
     assert ProcessTask._pool_size == 2
     assert ProcessTask._max_tasks_per_child == 5
-    
+
     # Cleanup (normally done in worker.cleanup())
     ProcessTask.shutdown_pool(wait=True)
-    
+
     # Verify pool shutdown
     assert ProcessTask._process_pool is None
     assert ProcessTask._pool_size is None
@@ -373,37 +392,37 @@ async def test_process_pool_lifecycle_with_worker(redis_driver):
 @pytest.mark.integration
 async def test_process_task_isolation(dispatcher, worker):
     """Verify ProcessTask runs in separate process (not main process)."""
-    import os as main_os
-    
-    main_pid = main_os.getpid()
-    
+
     class GetPIDTask(ProcessTask[int]):
         queue = "test-process"
-        
+
         def handle_process(self) -> int:
             import os as subprocess_os
+
             return subprocess_os.getpid()
-    
+
     # Dispatch and process
     task = GetPIDTask()
     await dispatcher.dispatch(task)
-    
+
     worker.max_tasks = 1
-    
+
     # We can't easily verify the PID from the test, but we can verify
     # the task executes without error, which proves it ran in subprocess
     worker_task = asyncio.create_task(worker.start())
     try:
         await asyncio.wait_for(worker_task, timeout=10.0)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         worker._running = False
         worker_task.cancel()
         try:
             await worker_task
         except asyncio.CancelledError:
             pass
-    
-    queue_size = await worker.queue_driver.get_queue_size("test-process", include_delayed=False, include_in_flight=False)
+
+    queue_size = await worker.queue_driver.get_queue_size(
+        "test-process", include_delayed=False, include_in_flight=False
+    )
     assert queue_size == 0
 
 
@@ -411,34 +430,37 @@ async def test_process_task_isolation(dispatcher, worker):
 @pytest.mark.integration
 async def test_process_task_with_timeout(dispatcher, worker):
     """Test ProcessTask timeout handling."""
-    
+
     class SlowTask(ProcessTask[str]):
         queue = "test-process"
         timeout = 1  # 1 second timeout
-        
+
         duration: int
-        
+
         def handle_process(self) -> str:
             import time
+
             time.sleep(self.duration)
             return "completed"
-    
+
     # Dispatch task that will timeout
     task = SlowTask(duration=3)
     await dispatcher.dispatch(task)
-    
+
     # Process with worker (should timeout and retry)
     worker.max_tasks = 2
     worker_task = asyncio.create_task(worker.start())
-    
+
     await asyncio.sleep(2)
-    
+
     worker._running = False
     await worker_task
-    
+
     # Task should have timed out (implementation may vary)
     # Verify worker didn't crash
-    queue_size = await worker.queue_driver.get_queue_size("test-process", include_delayed=False, include_in_flight=True)
+    queue_size = await worker.queue_driver.get_queue_size(
+        "test-process", include_delayed=False, include_in_flight=True
+    )
     assert queue_size >= 0  # Verify operation succeeded
 
 
@@ -452,26 +474,30 @@ async def test_process_task_batch_processing(dispatcher, worker):
         task = FactorialTask(n=i + 3)
         task_id = await dispatcher.dispatch(task)
         task_ids.append(task_id)
-    
+
     # Verify all queued
-    queue_size = await worker.queue_driver.get_queue_size("test-process", include_delayed=False, include_in_flight=False)
+    queue_size = await worker.queue_driver.get_queue_size(
+        "test-process", include_delayed=False, include_in_flight=False
+    )
     assert queue_size == 10
-    
+
     # Process all with worker with timeout
     worker.max_tasks = 10
     worker_task = asyncio.create_task(worker.start())
     try:
         await asyncio.wait_for(worker_task, timeout=20.0)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         worker._running = False
         worker_task.cancel()
         try:
             await worker_task
         except asyncio.CancelledError:
             pass
-    
+
     # Verify all processed
-    queue_size = await worker.queue_driver.get_queue_size("test-process", include_delayed=False, include_in_flight=False)
+    queue_size = await worker.queue_driver.get_queue_size(
+        "test-process", include_delayed=False, include_in_flight=False
+    )
     assert queue_size == 0
 
 
