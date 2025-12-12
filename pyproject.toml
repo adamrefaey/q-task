@@ -54,6 +54,9 @@ Homepage = "https://github.com/adamrefaey/asynctasq"
 Repository = "https://github.com/adamrefaey/asynctasq"
 Issues = "https://github.com/adamrefaey/asynctasq/issues"
 
+[project.scripts]
+asynctasq = "asynctasq.cli.main:main"
+
 
 [build-system]
 requires = ["hatchling"]
