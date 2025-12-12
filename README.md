@@ -253,7 +253,7 @@ python -m asynctasq worker
 | **Type Safety**         | ✅ Full type hints, Generic[T]                     | ⚠️ Third-party stubs (celery-types)        |
 | **Multi-Driver**        | ✅ 5 drivers (Redis/PostgreSQL/MySQL/RabbitMQ/SQS) | ⚠️ 3 brokers (Redis/RabbitMQ/SQS)          |
 | **ORM Integration**     | ✅ Auto-serialization (SQLAlchemy/Django/Tortoise) | ❌ Manual serialization required          |
-| **Serialization**       | ✅ msgpack (fast, binary, efficient)               | ⚠️ JSON/pickle (configurable)              |
+| **Serialization**       | ✅ msgpack (fast, binary, efficient)               | ⚠️ JSON default (pickle/YAML/msgpack available) |
 | **FastAPI Integration** | ✅ First-class, lifespan management                | ⚠️ Manual setup, workarounds needed       |
 | **Dead-Letter Queue**   | ✅ Built-in (PostgreSQL/MySQL)                     | ⚠️ Manual setup (RabbitMQ DLX)             |
 | **ACID Guarantees**     | ✅ PostgreSQL/MySQL drivers                        | ❌ Not available                           |
