@@ -27,6 +27,20 @@ def _is_async_callable(func: Callable[..., Any]) -> TypeGuard[Callable[..., Awai
     return inspect.iscoroutinefunction(func)
 
 
+def _run_async_in_subprocess(
+    func: Callable[..., Awaitable[Any]], args: tuple[Any, ...], kwargs: dict[str, Any]
+) -> Any:
+    """Helper to run async function in subprocess with asyncio.run().
+
+    Must be module-level for ProcessPoolExecutor compatibility.
+    """
+
+    async def async_wrapper():
+        return await func(*args, **kwargs)
+
+    return asyncio.run(async_wrapper())
+
+
 @final
 class FunctionTask[T](BaseTask[T]):
     """Internal wrapper for @task decorated functions.
@@ -110,19 +124,10 @@ class FunctionTask[T](BaseTask[T]):
         pool = get_default_manager().get_async_pool()
         loop = asyncio.get_running_loop()
 
-        # Capture func for closure (type checker already narrowed it)
-        async_func = self.func
-        args = self.args
-        kwargs = self.kwargs
-
-        def run_in_subprocess():
-            # Create wrapper inside subprocess
-            async def async_wrapper():
-                return await async_func(*args, **kwargs)
-
-            return asyncio.run(async_wrapper())
-
-        return await loop.run_in_executor(pool, run_in_subprocess)
+        # Use module-level helper for ProcessPoolExecutor compatibility
+        return await loop.run_in_executor(
+            pool, _run_async_in_subprocess, self.func, self.args, self.kwargs
+        )
 
     async def _execute_sync(self) -> T:
         """Execute sync function via thread pool or process pool."""
