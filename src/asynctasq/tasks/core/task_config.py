@@ -8,11 +8,12 @@ from asynctasq.drivers import DriverType
 from asynctasq.drivers.base_driver import BaseDriver
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class TaskConfig:
     """Task execution configuration.
 
-    Mutable to support fluent API (e.g., task.on_queue().dispatch()).
+    Immutable configuration that ensures thread-safety and prevents accidental mutations.
+    Use dataclasses.replace() to create modified copies.
     """
 
     queue: str = "default"

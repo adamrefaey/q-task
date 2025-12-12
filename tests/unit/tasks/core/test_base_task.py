@@ -8,6 +8,7 @@ Testing Strategy:
 - Fast, isolated tests
 """
 
+from dataclasses import replace
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -384,7 +385,7 @@ class TestTaskDispatch:
     async def test_dispatch_with_driver_override_string(self) -> None:
         # Arrange
         task_instance = ConcreteTask()
-        task_instance.config.driver_override = "redis"
+        task_instance.config = replace(task_instance.config, driver_override="redis")  # type: ignore[call-overload]
         mock_dispatcher = AsyncMock()
         mock_dispatcher.dispatch = AsyncMock(return_value="task-id-456")
 
@@ -402,7 +403,7 @@ class TestTaskDispatch:
         # Arrange
         task_instance = ConcreteTask()
         mock_driver = MagicMock(spec=BaseDriver)
-        task_instance.config.driver_override = mock_driver
+        task_instance.config = replace(task_instance.config, driver_override=mock_driver)  # type: ignore[call-overload]
         mock_dispatcher = AsyncMock()
         mock_dispatcher.dispatch = AsyncMock(return_value="task-id-789")
 

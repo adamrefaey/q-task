@@ -156,10 +156,12 @@ class BaseTask[T](ABC):
         Returns:
             Self for chaining
 
-        Warning:
-            Mutates task instance. Subsequent dispatch() calls use modified config.
+        Note:
+            Creates new TaskConfig instance. Safe for concurrent use.
         """
-        self.config.queue = queue_name
+        from dataclasses import replace
+
+        self.config = replace(self.config, queue=queue_name)
         return self
 
     def delay(self, seconds: int) -> Self:
@@ -186,10 +188,12 @@ class BaseTask[T](ABC):
         Returns:
             Self for chaining
 
-        Warning:
-            Mutates task instance. Applied to all subsequent dispatch() calls.
+        Note:
+            Creates new TaskConfig instance. Safe for concurrent use.
         """
-        self.config.retry_delay = seconds
+        from dataclasses import replace
+
+        self.config = replace(self.config, retry_delay=seconds)
         return self
 
     async def dispatch(self) -> str:
