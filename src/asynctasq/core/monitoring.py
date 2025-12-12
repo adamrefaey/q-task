@@ -10,7 +10,9 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from asynctasq.core.models import QueueStats, TaskInfo, WorkerInfo
-from asynctasq.tasks import TaskService
+from asynctasq.tasks.services.executor import TaskExecutor
+from asynctasq.tasks.services.repository import TaskRepository
+from asynctasq.tasks.services.serializer import TaskSerializer
 
 if TYPE_CHECKING:
     from asynctasq.drivers.base_driver import BaseDriver
@@ -30,10 +32,16 @@ class MonitoringService:
 
     driver: "BaseDriver"
     serializer: "BaseSerializer | None" = None
-    _task_service: TaskService = field(init=False)
+    _task_serializer: TaskSerializer = field(init=False)
+    _task_executor: TaskExecutor = field(init=False)
+    _task_repository: TaskRepository = field(init=False)
 
     def __post_init__(self) -> None:
-        self._task_service = TaskService(serializer=self.serializer, driver=self.driver)
+        self._task_serializer = TaskSerializer(self.serializer)
+        self._task_repository = TaskRepository(self.driver, self._task_serializer)
+        self._task_executor = TaskExecutor(
+            self.driver, self._task_serializer, self._task_repository
+        )
 
     async def get_queue_stats(self, queue: str) -> QueueStats:
         """
@@ -126,7 +134,7 @@ class MonitoringService:
         Returns:
             List of (raw_bytes, queue_name) tuples
         """
-        return await self._task_service.get_running_tasks(limit=limit, offset=offset)
+        return await self._task_repository.get_running_tasks(limit=limit, offset=offset)
 
     async def get_running_task_infos(self, limit: int = 50, offset: int = 0) -> list[TaskInfo]:
         """
@@ -139,7 +147,7 @@ class MonitoringService:
         Returns:
             List of TaskInfo models
         """
-        return await self._task_service.get_running_task_infos(limit=limit, offset=offset)
+        return await self._task_repository.get_running_task_infos(limit=limit, offset=offset)
 
     async def get_tasks(
         self,
@@ -160,7 +168,7 @@ class MonitoringService:
         Returns:
             Tuple of (list of (raw_bytes, queue_name, status), total_count)
         """
-        return await self._task_service.get_tasks(
+        return await self._task_repository.get_tasks(
             status=status, queue=queue, limit=limit, offset=offset
         )
 
@@ -183,11 +191,11 @@ class MonitoringService:
         Returns:
             Tuple of (list of TaskInfo, total_count)
         """
-        return await self._task_service.get_task_infos(
+        return await self._task_repository.get_task_infos(
             status=status, queue=queue, limit=limit, offset=offset
         )
 
-    async def get_task_by_id(self, task_id: str) -> tuple[bytes, str, str] | None:
+    async def get_task_by_id(self, task_id: str) -> tuple[bytes, str | None, str | None] | None:
         """
         Get raw task data by ID.
 
@@ -195,9 +203,10 @@ class MonitoringService:
             task_id: Task UUID
 
         Returns:
-            Tuple of (raw_bytes, queue_name, status) or None if not found
+            Tuple of (raw_bytes, queue_name_or_none, status_or_none) or None if not found.
+            queue_name and status are None when using efficient driver lookup.
         """
-        return await self._task_service.get_task_by_id(task_id)
+        return await self._task_repository.get_task_by_id(task_id)
 
     async def get_task_info_by_id(self, task_id: str) -> TaskInfo | None:
         """
@@ -209,7 +218,7 @@ class MonitoringService:
         Returns:
             TaskInfo or None if not found
         """
-        return await self._task_service.get_task_info_by_id(task_id)
+        return await self._task_repository.get_task_info_by_id(task_id)
 
     async def retry_task(self, task_id: str) -> bool:
         """
@@ -221,7 +230,7 @@ class MonitoringService:
         Returns:
             True if successfully re-enqueued
         """
-        return await self._task_service.retry_task(task_id)
+        return await self._task_executor.retry_task(task_id)
 
     async def delete_task(self, task_id: str) -> bool:
         """
@@ -233,7 +242,7 @@ class MonitoringService:
         Returns:
             True if deleted
         """
-        return await self._task_service.delete_task(task_id)
+        return await self._task_repository.delete_task(task_id)
 
     async def get_all_queue_names(self) -> list[str]:
         """

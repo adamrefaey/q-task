@@ -76,6 +76,8 @@ ENV_VAR_MAPPING: dict[str, tuple[str, Any, Callable[[str], Any]]] = {
     # ProcessTask/ProcessPoolExecutor configuration
     "process_pool_size": ("ASYNCTASQ_PROCESS_POOL_SIZE", None, int),
     "process_pool_max_tasks_per_child": ("ASYNCTASQ_PROCESS_POOL_MAX_TASKS_PER_CHILD", None, int),
+    # Task repository configuration
+    "task_scan_limit": ("ASYNCTASQ_TASK_SCAN_LIMIT", "10000", int),
     # Task retention configuration
     "keep_completed_tasks": (
         "ASYNCTASQ_KEEP_COMPLETED_TASKS",
@@ -147,6 +149,9 @@ class Config:
     # Recommended: 100-1000 to prevent memory leaks (Python 3.11+)
     process_pool_max_tasks_per_child: int | None = None
 
+    # Task repository configuration
+    task_scan_limit: int = 10000
+
     # Task retention configuration
     # If False (default), completed tasks are deleted/removed after acknowledgment
     # If True, completed tasks are kept for history/audit purposes
@@ -213,6 +218,8 @@ class Config:
             raise ValueError("mysql_max_pool_size must be positive")
         if config.get("mysql_min_pool_size", 10) > config.get("mysql_max_pool_size", 10):
             raise ValueError("mysql_min_pool_size cannot be greater than mysql_max_pool_size")
+        if config.get("task_scan_limit", 10000) < 1:
+            raise ValueError("task_scan_limit must be positive")
 
 
 _global_config: Config | None = None

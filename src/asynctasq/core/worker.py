@@ -5,11 +5,14 @@ import logging
 import signal
 import socket
 import traceback
+from typing import Any
 import uuid
 
 from asynctasq.drivers.base_driver import BaseDriver
 from asynctasq.serializers import BaseSerializer, MsgpackSerializer
-from asynctasq.tasks import BaseTask, ProcessTask, TaskService
+from asynctasq.tasks import BaseTask
+from asynctasq.tasks.services.executor import TaskExecutor
+from asynctasq.tasks.services.serializer import TaskSerializer
 
 from .events import EventEmitter, EventType, TaskEvent, WorkerEvent
 
@@ -90,7 +93,8 @@ class Worker:
         self._tasks_processed = 0
         self._start_time: datetime | None = None
         self._heartbeat_task: asyncio.Task[None] | None = None
-        self._task_service = TaskService(serializer=self.serializer)
+        self._task_serializer = TaskSerializer(self.serializer)
+        self._task_executor = TaskExecutor()
 
     async def start(self) -> None:
         """Start the worker loop and block until shutdown.
@@ -113,20 +117,27 @@ class Worker:
         # Ensure driver is connected
         await self.queue_driver.connect()
 
-        # Initialize ProcessTask pool if configured
+        # Initialize ProcessPoolManager if configured
         if self.process_pool_size is not None or self.process_pool_max_tasks_per_child is not None:
+            from asynctasq.tasks import ProcessPoolManager
+
             logger.info(
-                "Initializing ProcessTask pool: size=%s, max_tasks_per_child=%s",
+                "Initializing ProcessPoolManager: size=%s, max_tasks_per_child=%s",
                 self.process_pool_size,
                 self.process_pool_max_tasks_per_child,
             )
-            ProcessTask.initialize_pool(
+            # Initialize both sync and async pools with same config
+            ProcessPoolManager.initialize_sync_pool(
+                max_workers=self.process_pool_size,
+                max_tasks_per_child=self.process_pool_max_tasks_per_child,
+            )
+            ProcessPoolManager.initialize_async_pool(
                 max_workers=self.process_pool_size,
                 max_tasks_per_child=self.process_pool_max_tasks_per_child,
             )
 
         # Setup signal handlers
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         for sig in (signal.SIGTERM, signal.SIGINT):
             loop.add_signal_handler(sig, self._handle_shutdown)
 
@@ -319,7 +330,7 @@ class Worker:
                 )
 
             # Execute task with timeout (delegated to TaskService)
-            await self._task_service.execute_task(task)
+            await self._task_executor.execute(task)
 
             # Calculate duration
             duration_ms = int((datetime.now(UTC) - start_time).total_seconds() * 1000)
@@ -431,10 +442,14 @@ class Worker:
         task_id = task._task_id or "unknown"  # Fallback for type safety
 
         # Check if we should retry (uses TaskService for the decision logic)
-        if self._task_service.should_retry(task, exception):
+        if self._task_executor.should_retry(task, exception):
             # prepare_for_retry increments attempts and serializes
-            serialized_task = self._task_service.prepare_for_retry(task)
-            logger.info(f"Retrying task {task_id} (attempt {task._attempts}/{task.max_retries})")
+            # Returns tuple (task, bytes) for safer error handling
+            task = self._task_executor.prepare_retry(task)
+            serialized_task = self._task_serializer.serialize(task)
+            logger.info(
+                f"Retrying task {task_id} (attempt {task._attempts}/{task.config.max_retries})"
+            )
 
             # Emit task_retrying event
             if self.event_emitter:
@@ -462,9 +477,22 @@ class Worker:
                 )
 
             # Re-enqueue with delay (this creates a NEW task with updated attempt count)
-            await self.queue_driver.enqueue(
-                task.queue, serialized_task, delay_seconds=task.retry_delay
-            )
+            try:
+                await self.queue_driver.enqueue(
+                    task.config.queue, serialized_task, delay_seconds=task.config.retry_delay
+                )
+            except Exception as enqueue_error:
+                # Rollback attempt increment if enqueue failed
+                task._attempts -= 1
+                logger.error(
+                    f"Failed to enqueue retry for task {task_id}: {enqueue_error}",
+                    extra={
+                        "task_id": task_id,
+                        "queue": task.config.queue,
+                        "attempt": task._attempts,
+                    },
+                )
+                raise
         else:
             # Task has failed permanently - increment to reflect the failed attempt
             task._attempts += 1
@@ -487,7 +515,7 @@ class Worker:
                 )
 
             # Call task's failed() hook via TaskService
-            await self._task_service.handle_task_failed(task, exception)
+            await self._task_executor.handle_failed(task, exception)
 
             # Remove task from processing and mark as failed
             # Use mark_failed() if available (Redis), otherwise use ack() for cleanup
@@ -520,7 +548,50 @@ class Worker:
             ImportError: If task class cannot be imported
             AttributeError: If task class not found in module
         """
-        return await self._task_service.deserialize_task(task_data)
+        return await self._task_serializer.deserialize(task_data)
+
+    def get_health_status(self) -> dict[str, Any]:
+        """Get worker health status including process pool info.
+
+        Returns comprehensive health information for monitoring:
+        - Worker identification (id, hostname)
+        - Runtime stats (uptime, tasks processed, active tasks)
+        - Queue configuration
+        - Process pool status and configuration
+
+        Returns:
+            Dict with health status information
+
+        Example:
+            {
+                "worker_id": "worker-abc123",
+                "hostname": "server-1",
+                "uptime_seconds": 3600,
+                "tasks_processed": 1234,
+                "active_tasks": 5,
+                "queues": ["default", "high-priority"],
+                "process_pool": {
+                    "status": "initialized",
+                    "pool_size": 8,
+                    "max_tasks_per_child": 1000
+                }
+            }
+        """
+        from asynctasq.tasks.infrastructure.process_pool_manager import ProcessPoolManager
+
+        uptime = (
+            int((datetime.now(UTC) - self._start_time).total_seconds()) if self._start_time else 0
+        )
+
+        return {
+            "worker_id": self.worker_id,
+            "hostname": self.hostname,
+            "uptime_seconds": uptime,
+            "tasks_processed": self._tasks_processed,
+            "active_tasks": len(self._tasks),
+            "queues": self.queues,
+            "process_pool": ProcessPoolManager.get_stats(),
+        }
 
     def _handle_shutdown(self) -> None:
         """Handle graceful shutdown."""
@@ -547,9 +618,12 @@ class Worker:
         if self._tasks:
             await asyncio.wait(self._tasks)
 
-        # Shutdown ProcessTask pool (graceful - wait for in-flight tasks)
-        logger.info("Shutting down ProcessTask pool...")
-        ProcessTask.shutdown_pool(wait=True)
+        # Shutdown process pool if initialized (graceful - wait for in-flight tasks)
+        from asynctasq.tasks.infrastructure.process_pool_manager import ProcessPoolManager
+
+        if ProcessPoolManager.is_initialized():
+            logger.info("Shutting down process pool...")
+            ProcessPoolManager.shutdown_pools(wait=True, cancel_futures=False)
 
         # Emit worker_offline event
         if self.event_emitter:

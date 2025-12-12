@@ -7,7 +7,7 @@ from asynctasq.config import Config, get_global_config
 from asynctasq.drivers import DriverType
 from asynctasq.drivers.base_driver import BaseDriver
 from asynctasq.serializers import BaseSerializer, MsgpackSerializer
-from asynctasq.tasks import TaskService
+from asynctasq.tasks.services.serializer import TaskSerializer
 
 from .driver_factory import DriverFactory
 from .events import EventEmitter, EventType, TaskEvent
@@ -40,16 +40,16 @@ class Dispatcher:
         self.serializer = serializer or MsgpackSerializer()
         self.event_emitter = event_emitter
         self._driver_cache: dict[str, BaseDriver] = {}  # Cache for driver overrides
-        self._task_service = TaskService(serializer=self.serializer)
+        self._task_serializer = TaskSerializer(self.serializer)
 
     def _get_driver(self, task: "BaseTask") -> BaseDriver:
         """Get the appropriate driver for this task.
 
         Resolution order:
-        1. Task's _driver_override attribute (BaseDriver instance or string)
+        1. Task's config.driver_override attribute (BaseDriver instance or string)
         2. Global default driver
         """
-        driver_override: BaseDriver | DriverType | None = getattr(task, "_driver_override", None)
+        driver_override = task.config.driver_override
 
         if driver_override is None:
             return self.driver
@@ -84,7 +84,7 @@ class Dispatcher:
 
         Args:
             task: BaseTask instance to dispatch
-            queue: Queue name (overrides task.queue if set)
+            queue: Queue name (overrides task.config.queue if set)
             delay: Delay in seconds (overrides task._delay_seconds if set)
 
         Returns:
@@ -96,7 +96,7 @@ class Dispatcher:
         task._dispatched_at = datetime.now(UTC)
 
         # Determine queue and delay
-        target_queue = queue or task.queue
+        target_queue = queue or task.config.queue
         if delay is not None:
             delay_seconds = delay
         else:
@@ -105,7 +105,7 @@ class Dispatcher:
         # Get driver and serialize task
         driver = self._get_driver(task)
         driver_type = driver.__class__.__name__
-        serialized_task = self._task_service.serialize_task(task)
+        serialized_task = self._task_serializer.serialize(task)
 
         # Enqueue
         await driver.enqueue(target_queue, serialized_task, delay_seconds)
