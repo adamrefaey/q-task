@@ -52,7 +52,7 @@ python -m asynctasq worker --queues low-priority,batch --concurrency 5
 - Add context to exception messages
 
 ```python
-class ProcessPayment(BaseTask[bool]):
+class ProcessPayment(AsyncTask[bool]):
     async def failed(self, exception: Exception) -> None:
         # Log with context (ensure `logger` is defined/imported in your module)
         logger.error(

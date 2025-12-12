@@ -154,11 +154,13 @@ A modern, async-first, type-safe task queue for Python 3.12+. Inspired by Larave
 
   - ✅ **Function-based tasks** with `@task` decorator
 
-  - ✅ **Class-based tasks** with lifecycle hooks (`handle`, `failed`, `should_retry`)
+  - ✅ **Class-based tasks** with 4 execution modes:
+    - `AsyncTask` – Async I/O-bound (API calls, async DB queries)
+    - `SyncTask` – Sync I/O-bound via thread pool (`requests`, sync DB drivers)
+    - `AsyncProcessTask` – Async CPU-intensive via process pool
+    - `SyncProcessTask` – Sync CPU-intensive via process pool (bypasses GIL)
 
-  - ✅ **Sync tasks (SyncTask)** – Automatic thread pool execution for blocking operations
-
-  - ✅ **Process tasks (ProcessTask)** – True multiprocessing for CPU-intensive work, bypasses GIL
+  - ✅ **Lifecycle hooks** – `execute()`, `failed()`, `should_retry()` for complete control
 
   - ✅ **Method chaining** for fluent task configuration
 

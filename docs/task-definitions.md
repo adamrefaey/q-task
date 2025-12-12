@@ -4,7 +4,14 @@ AsyncTasQ supports two task definition styles: **function-based** (simple, inlin
 
 ## Function-Based Tasks
 
-Use the `@task` decorator for simple, inline task definitions.
+Use the `@task` decorator for simple, inline task definitions. The decorator provides **all 4 execution modes** through a combination of function type and the `process` parameter:
+
+| Mode | Function Type | `process=` | Execution | Best For |
+|------|---------------|-----------|-----------|----------|
+| **AsyncTask** | `async def` | `False` (default) | Event loop | Async I/O-bound |
+| **SyncTask** | `def` | `False` (default) | Thread pool | Sync/blocking I/O |
+| **AsyncProcessTask** | `async def` | `True` | Process pool (async) | Async CPU-intensive |
+| **SyncProcessTask** | `def` | `True` | Process pool (sync) | Sync CPU-intensive |
 
 **Basic Function Task:**
 
@@ -35,17 +42,29 @@ async def send_welcome_email(user_id: int):
     print(f"Sending welcome email to user {user_id}")
 ```
 
-**Synchronous Tasks:**
+**Synchronous I/O Tasks:**
 
-For blocking I/O or CPU-intensive work:
+For blocking I/O operations (runs in thread pool via `SyncTask`):
 
 ```python
-@task(queue='reports')
-def generate_report(report_id: int):
+@task(queue='web-scraping')
+def fetch_web_page(url: str):
     # Synchronous function runs in thread pool
-    import time
-    time.sleep(5)  # Blocking operation OK
-    return f"Report {report_id} generated"
+    import requests
+    response = requests.get(url)  # Blocking operation OK
+    return response.text
+```
+
+**CPU-Intensive Tasks:**
+
+For heavy CPU work, add `process=True` to run in process pool:
+
+```python
+@task(queue='data-processing', process=True, timeout=600)
+def heavy_computation(data: list[float]):
+    # Runs in ProcessPoolExecutor - bypasses GIL
+    import numpy as np
+    return np.fft.fft(data).tolist()
 ```
 
 **Dispatching Function Tasks:**
@@ -65,14 +84,30 @@ task_id = await send_email(to="user@example.com", subject="Hello", body="Hi!").d
 
 ## Class-Based Tasks
 
-Use the `BaseTask` base class for complex tasks with lifecycle hooks and custom retry logic.
+AsyncTasQ provides **4 base classes** for different execution patterns:
 
-**Basic Class Task:**
+1. **`AsyncTask`** - Async I/O-bound tasks (API calls, DB queries) - **Use this 90% of the time**
+2. **`SyncTask`** - Sync I/O-bound tasks via ThreadPoolExecutor (blocking libraries)
+3. **`AsyncProcessTask`** - Async CPU-bound tasks via ProcessPoolExecutor (async heavy computation)
+4. **`SyncProcessTask`** - Sync CPU-bound tasks via ProcessPoolExecutor (CPU-intensive work)
+
+### Quick Selection Guide
+
+| Task Type | Use For | Execution Context | Example |
+|-----------|---------|-------------------|----------|
+| `AsyncTask` | I/O-bound async operations | Event loop | API calls, async DB queries, file I/O |
+| `SyncTask` | I/O-bound sync/blocking operations | Thread pool | `requests` library, sync DB drivers |
+| `AsyncProcessTask` | CPU-bound async operations | Process pool with async | ML inference with async preprocessing |
+| `SyncProcessTask` | CPU-bound sync operations | Process pool | Data processing, encryption, video encoding |
+
+### AsyncTask - Async I/O-Bound (Default Choice)
+
+Use for async operations like API calls, database queries, file I/O:
 
 ```python
-from asynctasq.tasks import BaseTask
+from asynctasq.tasks import AsyncTask
 
-class ProcessPayment(BaseTask[bool]):
+class ProcessPayment(AsyncTask[bool]):
     queue = "payments"
     max_retries = 3
     retry_delay = 60
@@ -83,17 +118,88 @@ class ProcessPayment(BaseTask[bool]):
         self.user_id = user_id
         self.amount = amount
 
-    async def handle(self) -> bool:
-        # Your payment processing logic
+    async def execute(self) -> bool:
+        # Async I/O-bound work
         print(f"Processing ${self.amount} for user {self.user_id}")
-        await asyncio.sleep(2)
+        await asyncio.sleep(2)  # Async operation
         return True
+```
+
+### SyncTask - Sync I/O-Bound via Thread Pool
+
+Use for blocking I/O operations (e.g., `requests` library, sync DB drivers):
+
+```python
+from asynctasq.tasks import SyncTask
+import requests
+
+class FetchWebPage(SyncTask[str]):
+    queue = "web-scraping"
+    max_retries = 3
+
+    def __init__(self, url: str, **kwargs):
+        super().__init__(**kwargs)
+        self.url = url
+
+    def execute(self) -> str:
+        # Runs in thread pool - blocking OK
+        response = requests.get(self.url)
+        return response.text
+```
+
+### AsyncProcessTask - Async CPU-Bound via Process Pool
+
+Use for CPU-intensive async operations (e.g., ML inference with async preprocessing):
+
+```python
+from asynctasq.tasks import AsyncProcessTask
+
+class ProcessVideoAsync(AsyncProcessTask[dict]):
+    queue = "video-processing"
+    timeout = 3600
+
+    def __init__(self, video_path: str, **kwargs):
+        super().__init__(**kwargs)
+        self.video_path = video_path
+
+    async def execute(self) -> dict:
+        # Runs in subprocess with async support
+        # Async preprocessing
+        async with aiofiles.open(self.video_path, 'rb') as f:
+            data = await f.read()
+        
+        # CPU-intensive work (bypasses GIL)
+        result = await self._process_frames(data)
+        return {"frames_processed": result}
+```
+
+### SyncProcessTask - Sync CPU-Bound via Process Pool
+
+Use for CPU-intensive synchronous operations (e.g., data processing, encryption):
+
+```python
+from asynctasq.tasks import SyncProcessTask
+import numpy as np
+
+class ProcessLargeDataset(SyncProcessTask[dict]):
+    queue = "data-processing"
+    timeout = 3600
+
+    def __init__(self, data: list[float], **kwargs):
+        super().__init__(**kwargs)
+        self.data = data
+
+    def execute(self) -> dict:
+        # Runs in subprocess - bypasses GIL
+        arr = np.array(self.data)
+        result = np.fft.fft(arr)  # CPU-intensive
+        return {"mean": float(result.mean())}
 ```
 
 **With Lifecycle Hooks:**
 
 ```python
-class ProcessPayment(BaseTask[bool]):
+class ProcessPayment(AsyncTask[bool]):
     queue = "payments"
     max_retries = 3
     retry_delay = 60
@@ -103,7 +209,7 @@ class ProcessPayment(BaseTask[bool]):
         self.user_id = user_id
         self.amount = amount
 
-    async def handle(self) -> bool:
+    async def execute(self) -> bool:
         # Main task logic
         print(f"Processing ${self.amount} for user {self.user_id}")
         await self._charge_card()
@@ -157,133 +263,113 @@ task_id = await ProcessPayment(user_id=123, amount=99.99) \
     .dispatch()
 ```
 
-**Synchronous Class Tasks:**
-
-```python
-from asynctasq.tasks import SyncTask
-
-class GenerateReport(SyncTask[str]):
-    queue = "reports"
-    timeout = 300  # 5 minutes
-
-    def __init__(self, report_id: int, **kwargs):
-        super().__init__(**kwargs)
-        self.report_id = report_id
-
-    def handle_sync(self) -> str:
-        # Synchronous handle method (runs in thread pool)
-        import time
-        time.sleep(5)  # Blocking operation OK
-        return f"Report {self.report_id} generated"
-```
-
-**CPU-Intensive Class Tasks (Multiprocessing):**
-
-```python
-from asynctasq.tasks import ProcessTask
-
-class VideoEncoding(ProcessTask[str]):
-    """CPU-intensive task - runs in separate process with independent GIL."""
-    queue = "heavy-cpu"
-    timeout = 600  # 10 minutes
-
-    def __init__(self, video_path: str, output_format: str, **kwargs):
-        super().__init__(**kwargs)
-        self.video_path = video_path
-        self.output_format = output_format
-
-    def handle_process(self) -> str:
-        # Runs in subprocess - true parallelism, bypasses GIL
-        import ffmpeg  # Heavy CPU work
-        output_path = f"{self.video_path}.{self.output_format}"
-        ffmpeg.input(self.video_path).output(output_path).run()
-        return output_path
-```
-
----
-
 ## Choosing the Right Task Type
 
-AsyncTasQ provides **three task execution modes** optimized for different workloads. Choosing the right mode is critical for optimal performance:
+AsyncTasQ provides **4 task execution modes** optimized for different workloads. Choosing the right mode is critical for optimal performance:
 
-### The Three Execution Modes
+### The Four Execution Modes
 
-1. **BaseTask** (Async) - Event loop execution for I/O-bound operations
-2. **SyncTask** (Thread Pool) - Thread pool execution for moderate CPU work or blocking libraries  
-3. **ProcessTask** (Process Pool) - Multiprocessing execution for heavy CPU-intensive workloads
+1. **`AsyncTask`** - Event loop execution for async I/O-bound operations
+2. **`SyncTask`** - Thread pool execution for sync/blocking I/O operations
+3. **`AsyncProcessTask`** - Process pool execution for async CPU-intensive operations
+4. **`SyncProcessTask`** - Process pool execution for sync CPU-intensive operations
 
 ### Comparison Table
 
-| Task Type       | Execution Context  | Best For                          | CPU Usage   | Example Use Cases                        |
-| --------------- | ------------------ | --------------------------------- | ----------- | ---------------------------------------- |
-| `BaseTask`      | Event loop (async) | I/O-bound operations              | < 10%       | API calls, DB queries, file I/O, network |
-| `SyncTask`      | Thread pool (sync) | Moderate CPU work, blocking libs  | 10-80%      | Image resize, data parsing, sync libs    |
-| `ProcessTask`   | Process pool       | Heavy CPU-intensive computation   | > 80%       | Video encoding, ML inference, encryption |
+| Task Type | Execution Context | Best For | Concurrency | Example Use Cases |
+|-----------|-------------------|----------|-------------|-------------------|
+| `AsyncTask` | Event loop (async) | Async I/O-bound | 1000s concurrent | API calls, async DB queries, WebSocket, async file I/O |
+| `SyncTask` | Thread pool | Sync/blocking I/O | 100s concurrent | `requests` library, sync DB drivers, file operations |
+| `AsyncProcessTask` | Process pool (async) | Async CPU-intensive | CPU cores | ML inference with async I/O, async video processing |
+| `SyncProcessTask` | Process pool (sync) | Sync CPU-intensive | CPU cores | NumPy/Pandas processing, encryption, image processing |
 
 ### Quick Decision Matrix
 
 **Choose based on your workload characteristics:**
 
 ```python
-# ✅ Use BaseTask (async) for I/O-bound work
-class FetchData(BaseTask[dict]):
-    async def handle(self) -> dict:
+# ✅ Use AsyncTask for async I/O-bound work (90% of use cases)
+class FetchData(AsyncTask[dict]):
+    async def execute(self) -> dict:
         async with httpx.AsyncClient() as client:
             response = await client.get(url)
             return response.json()
 
-# ⚠️ Use SyncTask for moderate CPU work or blocking libraries
-class ResizeImage(SyncTask[bytes]):
-    def handle_sync(self) -> bytes:
-        from PIL import Image
-        img = Image.open(self.path)
-        img.thumbnail((800, 600))
-        return img.tobytes()
+# ✅ Use SyncTask for blocking I/O (requests, sync DB drivers)
+class FetchWebPage(SyncTask[str]):
+    def execute(self) -> str:
+        import requests
+        response = requests.get(self.url)
+        return response.text
 
-# 🚀 Use ProcessTask for heavy CPU work (>80% CPU utilization)
-class TrainModel(ProcessTask[dict]):
-    def handle_process(self) -> dict:
+# 🚀 Use AsyncProcessTask for async CPU-intensive work
+class ProcessVideoAsync(AsyncProcessTask[dict]):
+    async def execute(self) -> dict:
+        # Async I/O + CPU work in subprocess
+        async with aiofiles.open(self.path, 'rb') as f:
+            data = await f.read()
+        return await self._process_frames(data)
+
+# 🚀 Use SyncProcessTask for sync CPU-intensive work
+class ProcessDataset(SyncProcessTask[dict]):
+    def execute(self) -> dict:
         import numpy as np
-        # Heavy computation with independent GIL
-        result = np.linalg.inv(large_matrix)
-        return {"accuracy": 0.95}
+        # Heavy computation bypasses GIL
+        result = np.linalg.inv(self.large_matrix)
+        return {"result": result.tolist()}
 ```
 
 ### Performance Characteristics
 
 | Mode | Concurrency | Memory Overhead | Best Throughput |
 |------|------------|-----------------|------------------|
-| **BaseTask** | 1000s concurrent | Minimal (~KB per task) | I/O-bound workloads |
-| **SyncTask** | Thread pool limited | Moderate (~MB per thread) | Mixed I/O + CPU |
-| **ProcessTask** | CPU core limited | High (~50MB+ per process) | CPU-bound workloads |
+| **AsyncTask** | 1000s concurrent | Minimal (~KB per task) | I/O-bound async workloads |
+| **SyncTask** | 100s concurrent | Low (~MB per thread) | I/O-bound sync/blocking workloads |
+| **AsyncProcessTask** | CPU cores | High (~50MB+ per process) | CPU-intensive with async I/O |
+| **SyncProcessTask** | CPU cores | High (~50MB+ per process) | CPU-intensive sync workloads |
 
 ### When to Use Each Type
 
-**BaseTask (Default - Use for 90% of tasks):**
+**AsyncTask (Default - Use for 90% of tasks):**
 
-✅ I/O-bound operations (API calls, database queries, file operations)  
+✅ I/O-bound async operations (API calls, async database queries)  
 ✅ Tasks that spend time waiting (network, disk, external services)  
-✅ Async libraries available (httpx, aiohttp, asyncpg, etc.)  
+✅ Async libraries available (httpx, aiohttp, asyncpg, aiofiles, etc.)  
 ✅ Need high concurrency (1000s of tasks)  
-✅ CPU usage < 10%
+✅ Low CPU utilization during execution  
 
-**SyncTask (Use for blocking code):**
+**SyncTask (For blocking I/O):**
 
-✅ Using blocking/sync-only libraries (requests, PIL, pandas)  
-✅ Moderate CPU work (10-80% utilization)  
-✅ Don't want to convert sync code to async  
-✅ Thread pool size sufficient for your concurrency needs
+✅ Blocking I/O libraries (`requests`, sync DB drivers like `psycopg2`)  
+✅ File operations with sync libraries  
+✅ Legacy sync code that can't be easily converted to async  
+✅ Moderate concurrency needed (100s of tasks)  
 
-**ProcessTask (Use sparingly for heavy CPU work):**
+❌ Don't use for async code (use `AsyncTask` instead)  
+❌ Don't use for CPU-intensive work (use process tasks instead)
+
+**AsyncProcessTask (For async CPU-intensive work):**
+
+✅ CPU-intensive work that also needs async I/O  
+✅ ML inference with async preprocessing/postprocessing  
+✅ Video processing with async file operations  
+✅ Task duration > 100ms (amortizes process overhead)  
+✅ All arguments and return values are serializable (msgpack-compatible)  
+
+❌ Don't use for pure I/O-bound tasks (use `AsyncTask` instead)  
+❌ Don't use for short tasks < 100ms (overhead not worth it)
+
+**SyncProcessTask (For sync CPU-intensive work):**
 
 ✅ CPU utilization > 80% (verified with profiling)  
+✅ Heavy computation that bypasses GIL (NumPy, Pandas, encryption)  
 ✅ Task duration > 100ms (amortizes process overhead)  
-✅ All arguments and return values are picklable  
-✅ No shared memory needed (processes are isolated)  
+✅ All arguments and return values are serializable (msgpack-compatible)  
+✅ No async operations needed  
 
-❌ Don't use for I/O-bound tasks (use `Task` instead)  
+❌ Don't use for I/O-bound tasks (use `AsyncTask` or `SyncTask` instead)  
 ❌ Don't use for short tasks < 100ms (overhead not worth it)  
-❌ Don't use with unpicklable objects (will fail at runtime)
+❌ Don't use with unserializable objects like lambdas or file handles (will fail at dispatch)
 
 ---
 
@@ -298,7 +384,212 @@ class TrainModel(ProcessTask[dict]):
 | `retry_delay` | `int`         | `60`        | Seconds to wait between retries             |
 | `timeout`     | `int \| None` | `None`      | Task timeout in seconds (None = no timeout) |
 
-**Configuration Methods:**
+---
+
+## Configuration Approaches: Function vs Class Tasks
+
+AsyncTasQ provides **two distinct configuration systems** depending on your task definition style. Understanding when and how to use each is essential for writing clean, maintainable code.
+
+### Overview
+
+| Task Style | Configuration Source | Example |
+|-----------|---------------------|---------|
+| **Function-based** (`@task`) | Decorator arguments | `@task(queue='emails', max_retries=5)` |
+| **Class-based** (`AsyncTask`, `SyncTask`) | Class attributes | `class MyTask: queue = 'emails'` |
+
+### Function-Based Task Configuration
+
+**Function tasks ALWAYS use decorator arguments for configuration.** Class attributes are ignored.
+
+```python
+# ✅ CORRECT: Use decorator arguments
+@task(queue='emails', max_retries=5, retry_delay=120, timeout=30)
+async def send_email(to: str, subject: str, body: str):
+    print(f"Sending email to {to}: {subject}")
+    return f"Email sent to {to}"
+
+# ❌ WRONG: Class attributes don't apply to function tasks
+@task
+async def send_email(to: str, subject: str, body: str):
+    # These attributes are ignored!
+    queue = "emails"  # This is just a local variable
+    max_retries = 5   # This does nothing
+    print(f"Sending email to {to}: {subject}")
+```
+
+**Runtime Configuration with Method Chaining:**
+
+```python
+# Decorator sets defaults
+@task(queue='notifications', max_retries=3)
+async def send_notification(user_id: int, message: str):
+    pass
+
+# Override at dispatch time with method chaining
+task_id = await send_notification(user_id=123, message="Hello") \
+    .on_queue("high-priority") \  # Override queue
+    .retry_after(30) \             # Override retry_delay
+    .delay(60) \                   # Add 60s delay
+    .dispatch()
+```
+
+### Class-Based Task Configuration
+
+**Class tasks use class attributes for default configuration.**
+
+```python
+# ✅ CORRECT: Use class attributes
+class ProcessPayment(AsyncTask[bool]):
+    # Configuration via class attributes
+    queue = "payments"
+    max_retries = 3
+    retry_delay = 60
+    timeout = 30
+
+    def __init__(self, user_id: int, amount: float, **kwargs):
+        super().__init__(**kwargs)
+        self.user_id = user_id
+        self.amount = amount
+
+    async def execute(self) -> bool:
+        print(f"Processing ${self.amount} for user {self.user_id}")
+        return True
+
+# Dispatch with defaults
+task_id = await ProcessPayment(user_id=123, amount=99.99).dispatch()
+```
+
+**Runtime Configuration with Method Chaining:**
+
+```python
+# Override class defaults at dispatch time
+task_id = await ProcessPayment(user_id=123, amount=99.99) \
+    .on_queue("high-priority") \  # Override class attribute
+    .retry_after(120) \            # Override retry_delay
+    .delay(60) \                   # Add delay
+    .dispatch()
+```
+
+**How It Works Internally:**
+
+```python
+class BaseTask:
+    @classmethod
+    def _extract_config_from_class(cls) -> dict[str, Any]:
+        """Extract TaskConfig values from class attributes."""
+        return {
+            "queue": getattr(cls, "queue", "default"),
+            "max_retries": getattr(cls, "max_retries", 3),
+            "retry_delay": getattr(cls, "retry_delay", 60),
+            "timeout": getattr(cls, "timeout", None),
+        }
+
+    def __init__(self, **kwargs):
+        # Read configuration from class attributes
+        config_values = self._extract_config_from_class()
+        self.config = TaskConfig(**config_values)
+        # ...
+```
+
+### Configuration Priority Order
+
+When multiple configuration sources are present, AsyncTasQ follows this priority order:
+
+**For Function Tasks:**
+1. **Method chaining** (highest priority) - `.on_queue("high")`
+2. **Decorator arguments** - `@task(queue='emails')`
+3. **Framework defaults** (lowest) - `queue='default'`
+
+**For Class Tasks:**
+1. **Method chaining** (highest priority) - `.on_queue("high")`
+2. **Class attributes** - `class MyTask: queue = 'emails'`
+3. **Framework defaults** (lowest) - `queue='default'`
+
+**Example:**
+
+```python
+# Function task priority order
+@task(queue='notifications', max_retries=3)  # 2. Decorator defaults
+async def send_notification(user_id: int):
+    pass
+
+# Override at runtime
+task_id = await send_notification(user_id=123) \
+    .on_queue("urgent") \  # 1. Highest priority - overrides decorator
+    .dispatch()
+# Result: Uses queue="urgent", max_retries=3
+
+# Class task priority order
+class ProcessOrder(AsyncTask[bool]):
+    queue = "orders"      # 2. Class attribute
+    max_retries = 3
+
+    def __init__(self, order_id: int, **kwargs):
+        super().__init__(**kwargs)
+        self.order_id = order_id
+
+    async def execute(self) -> bool:
+        return True
+
+# Override at runtime
+task_id = await ProcessOrder(order_id=456) \
+    .on_queue("express") \  # 1. Highest priority - overrides class attribute
+    .dispatch()
+# Result: Uses queue="express", max_retries=3
+```
+
+### Best Practices
+
+**✅ DO:**
+
+- Use decorator arguments for function tasks: `@task(queue='emails')`
+- Use class attributes for class tasks: `class MyTask: queue = 'emails'`
+- Use method chaining for runtime overrides: `.on_queue("high").delay(60)`
+- Be consistent within your codebase (pick function or class style and stick to it)
+
+**❌ DON'T:**
+
+- Mix configuration approaches (e.g., decorator + class attributes in same task)
+- Assume class attributes work with `@task` decorated functions
+- Modify `task.config` directly after instantiation (use method chaining instead)
+
+### Common Pitfalls
+
+**Pitfall 1: Expecting class attributes to work with `@task`**
+
+```python
+# ❌ WRONG: This doesn't work
+@task
+async def send_email(to: str):
+    queue = "emails"  # This is just a local variable, not configuration!
+    pass
+
+# ✅ CORRECT: Use decorator arguments
+@task(queue='emails')
+async def send_email(to: str):
+    pass
+```
+
+**Pitfall 2: Forgetting to call `super().__init__()` in class tasks**
+
+```python
+# ❌ WRONG: Missing super().__init__() call
+class ProcessPayment(AsyncTask[bool]):
+    def __init__(self, amount: float):
+        self.amount = amount  # Config not initialized!
+
+# ✅ CORRECT: Always call super().__init__()
+class ProcessPayment(AsyncTask[bool]):
+    def __init__(self, amount: float, **kwargs):
+        super().__init__(**kwargs)  # Initializes config
+        self.amount = amount
+```
+
+---
+
+## Additional Configuration Methods
+
+Beyond the two primary approaches, AsyncTasQ provides convenience methods for common scenarios:
 
 ```python
 # 1. Decorator configuration (function tasks)
@@ -307,16 +598,16 @@ async def send_email(to: str, subject: str):
     pass
 
 # 2. Class attributes (class tasks)
-class ProcessPayment(BaseTask[bool]):
+class ProcessPayment(AsyncTask[bool]):
     queue = "payments"
     max_retries = 3
     retry_delay = 60
     timeout = 30
 
-# 3. Method chaining (runtime configuration)
+# 3. Method chaining (runtime configuration for both)
 await task_instance.on_queue("high").retry_after(120).delay(60).dispatch()
 
-# 4. Dispatch parameters
+# 4. Dispatch parameters (function tasks only)
 await send_email.dispatch(to="user@example.com", subject="Hello", delay=60)
 ```
 
@@ -331,8 +622,8 @@ Tasks automatically track metadata:
 Access metadata in task methods:
 
 ```python
-class MyTask(BaseTask[None]):
-    async def handle(self) -> None:
+class MyTask(AsyncTask[None]):
+    async def execute(self) -> None:
         print(f"Task ID: {self._task_id}")
         print(f"Attempt: {self._attempts}")
         print(f"Dispatched at: {self._dispatched_at}")

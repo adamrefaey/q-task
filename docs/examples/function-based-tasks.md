@@ -4,11 +4,55 @@ This guide provides concrete, ready-to-use code examples demonstrating all scena
 
 Function-based tasks allow you to convert any Python function (async or sync) into a background task by simply adding the `@task` decorator. Tasks are automatically serialized, queued, and executed by workers.
 
+## Four Execution Modes
+
+The `@task` decorator provides **all 4 execution modes** through a combination of function type and the `process` parameter:
+
+| Mode | Function Type | `process=` | Execution | Best For |
+|------|---------------|-----------|-----------|----------|
+| **AsyncTask** | `async def` | `False` (default) | Event loop | Async I/O-bound (API calls, async DB queries) |
+| **SyncTask** | `def` | `False` (default) | Thread pool | Sync/blocking I/O (`requests`, sync DB drivers) |
+| **AsyncProcessTask** | `async def` | `True` | Process pool (async) | Async CPU-intensive work |
+| **SyncProcessTask** | `def` | `True` | Process pool (sync) | Sync CPU-intensive work (>80% CPU) |
+
+**Examples:**
+
+```python
+from asynctasq.tasks import task
+
+# Mode 1: AsyncTask (async I/O-bound) - DEFAULT for async functions
+@task
+async def fetch_data(url: str):
+    async with httpx.AsyncClient() as client:
+        return await client.get(url)
+
+# Mode 2: SyncTask (sync I/O-bound) - DEFAULT for sync functions
+@task
+def fetch_web_page(url: str):
+    import requests
+    return requests.get(url).text
+
+# Mode 3: AsyncProcessTask (async CPU-intensive)
+@task(process=True)
+async def process_video_async(path: str):
+    async with aiofiles.open(path, 'rb') as f:
+        data = await f.read()
+    # CPU-intensive processing
+    return process_frames(data)
+
+# Mode 4: SyncProcessTask (sync CPU-intensive)
+@task(process=True)
+def heavy_computation(data: list[float]):
+    import numpy as np
+    return np.fft.fft(data)  # CPU-intensive
+```
+
 **Key Features:**
 
 - **Simple decorator syntax** - Just add `@task` to any function
-- **Automatic async/sync handling** - Sync functions run in thread pool automatically
-- **Flexible configuration** - Queue, retries, timeout, driver via decorator or method chaining
+- **Automatic execution routing** - Framework selects appropriate executor based on function type and `process` flag
+- **Full mode coverage** - Access to all 4 execution modes (same as class-based tasks)
+- **Flexible configuration** - Queue, retries, timeout, driver, process via decorator or method chaining
 - **Method chaining** - Override configuration at dispatch time with fluent API
 - **ORM model serialization** - Automatic lightweight references for SQLAlchemy, Django, Tortoise
 - **Type-safe** - Full type hints and Generic support
@@ -95,7 +139,14 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
-**Note:** While sync functions work, async functions are recommended for I/O-bound operations as they provide better performance and resource utilization.
+**Note:** For CPU-intensive work (>80% CPU utilization), add `process=True` to run in process pool:
+
+```python
+@task(process=True)  # Runs in ProcessPoolExecutor
+def heavy_computation(data: list[float]):
+    import numpy as np
+    return np.fft.fft(data)  # CPU-intensive work
+```
 
 ---
 
@@ -139,6 +190,7 @@ All configuration options can be set via the `@task` decorator. These settings a
 | `retry_delay` | `int`                       | `60`        | Seconds to wait between retry attempts                           |
 | `timeout`     | `int \| None`               | `None`      | Task timeout in seconds (`None` = no timeout)                    |
 | `driver`      | `str \| BaseDriver \| None` | `None`      | Driver override (string or instance, `None` = use global config) |
+| `process`     | `bool`                      | `False`     | Use process pool for CPU-intensive work (`True` = process pool, `False` = event loop/thread pool) |
 
 ### Queue Configuration
 
@@ -241,6 +293,53 @@ async def critical_operation(data: dict):
     pass
 ```
 
+### Process Pool Configuration
+
+Use `process=True` for CPU-intensive work that requires true multiprocessing (bypasses GIL):
+
+```python
+from asynctasq.tasks import task
+
+# Async CPU-intensive work
+@task(queue='ml-inference', process=True, timeout=300)
+async def run_ml_inference(model_path: str, data: list[float]):
+    """Async + process=True - runs in subprocess with async support."""
+    import aiofiles
+    
+    # Async I/O
+    async with aiofiles.open(model_path, 'rb') as f:
+        model_data = await f.read()
+    
+    # CPU-intensive work (bypasses GIL)
+    return run_model(model_data, data)
+
+# Sync CPU-intensive work
+@task(queue='data-processing', process=True, timeout=600)
+def process_large_dataset(data: list[float]):
+    """Sync + process=True - runs in subprocess."""
+    import numpy as np
+    
+    # Heavy CPU computation (bypasses GIL)
+    arr = np.array(data)
+    result = np.fft.fft(arr)
+    
+    return {
+        "mean": float(result.mean()),
+        "std": float(result.std())
+    }
+```
+
+**When to use `process=True`:**
+
+✅ CPU utilization > 80% (verified with profiling)  
+✅ Task duration > 100ms (amortizes process overhead)  
+✅ All arguments and return values are serializable (msgpack-compatible)  
+✅ Heavy computation: NumPy, Pandas, ML inference, video encoding, encryption  
+
+❌ Don't use for I/O-bound tasks (use default `process=False`)  
+❌ Don't use for short tasks < 100ms (overhead not worth it)  
+❌ Don't use with unserializable objects (lambdas, file handles, sockets)
+
 ---
 
 ## Dispatching Tasks
@@ -340,64 +439,201 @@ async def main():
 
 ## Async vs Sync Functions
 
-AsyncTasQ supports both async and synchronous functions. The framework automatically handles the execution differences:
+The `@task` decorator provides **all 4 execution modes** through a combination of function type and the `process` parameter:
 
-- **Async functions**: Run directly in the event loop (recommended for I/O-bound tasks)
-- **Sync functions**: Automatically run in a thread pool (useful for CPU-bound or blocking operations)
+### Execution Mode Selection
+
+```python
+# Async + process=False (default) → AsyncTask (event loop)
+@task
+async def io_async(): ...
+
+# Sync + process=False (default) → SyncTask (thread pool)
+@task
+def io_sync(): ...
+
+# Async + process=True → AsyncProcessTask (process pool with async)
+@task(process=True)
+async def cpu_async(): ...
+
+# Sync + process=True → SyncProcessTask (process pool)
+@task(process=True)
+def cpu_sync(): ...
+```
+
+### Mode Comparison Table
+
+| Mode | Function Type | `process=` | Execution | Best For | Concurrency |
+|------|--------------|-----------|-----------|----------|-------------|
+| **AsyncTask** | `async def` | `False` (default) | Event loop | Async I/O-bound (API calls, async DB queries) | 1000s concurrent |
+| **SyncTask** | `def` | `False` (default) | Thread pool | Sync/blocking I/O (`requests`, sync DB drivers) | 100s concurrent |
+| **AsyncProcessTask** | `async def` | `True` | Process pool (async) | Async CPU-intensive work | CPU cores |
+| **SyncProcessTask** | `def` | `True` | Process pool (sync) | Sync CPU-intensive work (>80% CPU) | CPU cores |
 
 **When to use each:**
 
-| Use Case                              | Function Type | Reason                                |
-| ------------------------------------- | ------------- | ------------------------------------- |
-| API calls, database queries, file I/O | **Async**     | Better performance, non-blocking      |
-| CPU-intensive computation             | **Sync**      | Simpler code, automatic thread pool   |
-| Using blocking libraries              | **Sync**      | No need to convert to async           |
-| Network requests, web scraping        | **Async**     | Can handle many concurrent operations |
-| Image processing, data analysis       | **Sync**      | Thread pool handles CPU work          |
+| Use Case | Function Type | `process=` | Reason |
+|----------|--------------|-----------|--------|
+| API calls with httpx, aiohttp | `async def` | `False` | Native async support, non-blocking |
+| Database queries with asyncpg | `async def` | `False` | Better performance for I/O-bound |
+| Web scraping with `requests` | `def` | `False` | Blocking library, runs in thread pool |
+| File I/O with blocking libraries | `def` | `False` | No async conversion needed |
+| NumPy/Pandas computation | `def` | `True` | CPU-intensive, bypasses GIL |
+| ML inference, video encoding | `def` or `async def` | `True` | Heavy CPU work in subprocess |
+| ML inference with async I/O | `async def` | `True` | Async preprocessing + CPU work |
 
-### Async Function (Recommended)
+### Mode 1: AsyncTask (Default for async functions)
 
-Use async functions for I/O-bound operations (API calls, database queries, file operations):
+Use async functions for async I/O-bound operations (API calls, async database queries, async file operations):
 
 ```python
 from asynctasq.tasks import task
-import asyncio
+import httpx
 
-@task(queue='api')
+@task(queue='api')  # process=False is default
 async def fetch_user_data(user_id: int):
-    """Async function - runs directly in event loop."""
-    # Can use await here
-    await asyncio.sleep(0.1)
-    return {"id": user_id, "name": "John"}
+    """Async function - runs in event loop via AsyncTask."""
+    # Can use await for async I/O
+    async with httpx.AsyncClient() as client:
+        response = await client.get(f"https://api.example.com/users/{user_id}")
+        return response.json()
 ```
 
 **Benefits:**
 
-- Better performance for I/O-bound operations
-- Can use `await` for async libraries
-- More efficient resource usage
+- Best performance for I/O-bound operations
+- Can use `await` for async libraries (httpx, aiohttp, asyncpg, aiofiles)
+- More efficient resource usage (no thread overhead)
+- Higher concurrency (1000s of tasks)
 
-### Sync Function (Runs in Thread Pool)
+### Mode 2: SyncTask (Default for sync functions)
 
-Use sync functions for CPU-bound operations or when using blocking libraries:
+Use sync functions for sync/blocking I/O operations:
 
 ```python
 from asynctasq.tasks import task
-import time
+import requests
 
-@task(queue='processing')
-def heavy_computation(numbers: list[int]) -> int:
-    """Sync function - automatically runs in thread pool."""
-    # Blocking operations OK
-    time.sleep(2)
-    return sum(x * x for x in numbers)
+@task(queue='web-scraping')  # process=False is default
+def fetch_web_page(url: str) -> str:
+    """Sync function - automatically runs in thread pool via SyncTask."""
+    # Blocking operations OK - runs in thread pool
+    response = requests.get(url)
+    return response.text
 ```
 
 **Benefits:**
 
 - No need to convert blocking code to async
-- Automatic thread pool execution
-- Works with any synchronous library
+- Automatic thread pool execution (managed by framework)
+- Works with any synchronous library (`requests`, `psycopg2`, etc.)
+
+### Mode 3: AsyncProcessTask (Async + `process=True`)
+
+Use async functions with `process=True` for CPU-intensive work that also needs async I/O:
+
+```python
+from asynctasq.tasks import task
+import aiofiles
+
+@task(queue='video-processing', process=True)  # AsyncProcessTask
+async def process_video_async(video_path: str) -> dict:
+    """Async + process=True - runs in subprocess with asyncio.run()."""
+    # Async I/O
+    async with aiofiles.open(video_path, 'rb') as f:
+        data = await f.read()
+    
+    # CPU-intensive work (bypasses GIL in subprocess)
+    frames_processed = await process_frames(data)
+    
+    return {"frames": frames_processed}
+```
+
+**Benefits:**
+
+- True multi-core parallelism (bypasses GIL)
+- Async I/O support within subprocess
+- Best for ML inference with async preprocessing
+
+**Important:** All arguments and return values must be serializable (msgpack-compatible).
+
+### Mode 4: SyncProcessTask (Sync + `process=True`)
+
+Use sync functions with `process=True` for heavy CPU-intensive work:
+
+```python
+from asynctasq.tasks import task
+import numpy as np
+
+@task(queue='data-processing', process=True, timeout=600)  # SyncProcessTask
+def process_large_dataset(data: list[float]) -> dict:
+    """Sync + process=True - runs in subprocess via ProcessPoolExecutor."""
+    # Heavy CPU computation (bypasses GIL)
+    arr = np.array(data)
+    result = np.fft.fft(arr)
+    
+    return {
+        "mean": float(result.mean()),
+        "std": float(result.std())
+    }
+```
+
+**Benefits:**
+
+- True multi-core parallelism (bypasses GIL)
+- Best performance for CPU-intensive workloads (>80% CPU)
+- Each process has independent interpreter and memory
+
+**Limitations:**
+
+- All arguments and return values must be serializable (no lambdas, file handles, sockets)
+- Higher memory footprint (~50MB+ per process)
+- Higher startup overhead (~50ms per task)
+
+### Choosing the Right Mode
+
+**Decision Flow:**
+
+1. **Is your work CPU-intensive (>80% CPU)?**
+   - Yes → Use `process=True` (Mode 3 or 4)
+   - No → Use `process=False` (Mode 1 or 2)
+
+2. **Do you need async I/O?**
+   - Yes → Use `async def` (Mode 1 or 3)
+   - No → Use `def` (Mode 2 or 4)
+
+**Examples:**
+
+```python
+from asynctasq.tasks import task
+
+# ✅ Mode 1: Async I/O-bound (default)
+@task
+async def fetch_data(url: str):
+    async with httpx.AsyncClient() as client:
+        return await client.get(url)
+
+# ✅ Mode 2: Sync I/O-bound (default)
+@task
+def scrape_page(url: str):
+    import requests
+    return requests.get(url).text
+
+# ✅ Mode 3: Async CPU-intensive
+@task(process=True)
+async def ml_inference_async(data: list[float]):
+    # Async preprocessing
+    async with aiofiles.open('model.pkl', 'rb') as f:
+        model_data = await f.read()
+    # CPU-intensive work
+    return run_model(model_data, data)
+
+# ✅ Mode 4: Sync CPU-intensive
+@task(process=True)
+def heavy_math(matrix: list[list[float]]):
+    import numpy as np
+    return np.linalg.inv(np.array(matrix)).tolist()
+```
 
 ### Mixed Async/Sync in Same Application
 
