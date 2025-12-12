@@ -472,5 +472,38 @@ class TestTaskDecorator:
         assert test_func._task_timeout is None  # type: ignore[attr-defined]
 
 
+@mark.unit
+class TestFunctionTaskProcessExecution:
+    """Test FunctionTask process-based execution paths."""
+
+    @mark.asyncio
+    async def test_execute_async_direct_with_kwargs(self) -> None:
+        # Arrange
+        async def async_func(a: int, b: int) -> int:
+            return a + b
+
+        task_instance = FunctionTask(async_func, use_process=False, a=5, b=10)
+
+        # Act
+        result = await task_instance.run()
+
+        # Assert
+        assert result == 15
+
+    @mark.asyncio
+    async def test_execute_sync_thread_with_multiple_args(self) -> None:
+        # Arrange
+        def concat_func(*args: str) -> str:
+            return "-".join(args)
+
+        task_instance = FunctionTask(concat_func, "hello", "world", "test")
+
+        # Act
+        result = await task_instance.run()
+
+        # Assert
+        assert result == "hello-world-test"
+
+
 if __name__ == "__main__":
     main([__file__, "-s", "-m", "unit"])

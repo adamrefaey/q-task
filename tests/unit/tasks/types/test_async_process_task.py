@@ -314,3 +314,126 @@ async def test_async_process_task_shared_pool_with_sync(manager: ProcessPoolMana
 
     # Cleanup
     # shutdown handled by context manager
+
+
+@pytest.mark.asyncio
+async def test_async_process_task_warm_event_loop_path():
+    """Test warm event loop path (fast path with pre-initialized loop)."""
+    import asyncio
+    from unittest.mock import patch
+
+    # Arrange
+    task = SharedAsyncFactorialTask(n=4)
+
+    loop = asyncio.get_event_loop()
+    # Create a real Future instead of MagicMock
+    mock_future = loop.create_future()
+    mock_future.set_result(24)
+
+    with (
+        patch(
+            "asynctasq.tasks.types.async_process_task.get_warm_event_loop",
+            return_value=loop,
+        ),
+        patch(
+            "asynctasq.tasks.types.async_process_task.asyncio.run_coroutine_threadsafe",
+            return_value=mock_future,
+        ) as mock_run_coroutine,
+    ):
+        # Act
+        result = task._run_async_in_process()
+
+        # Assert
+        assert result == 24
+        mock_run_coroutine.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_async_process_task_fallback_path():
+    """Test fallback to asyncio.run() when warm loop unavailable."""
+    from unittest.mock import patch
+
+    # Arrange
+    task = SharedAsyncFactorialTask(n=3)
+
+    with (
+        patch(
+            "asynctasq.tasks.types.async_process_task.get_warm_event_loop",
+            return_value=None,  # Simulate no warm loop
+        ),
+        patch(
+            "asynctasq.tasks.types.async_process_task.increment_fallback_count",
+            return_value=1,
+        ),
+        patch(
+            "asynctasq.tasks.types.async_process_task.asyncio.run", return_value=6
+        ) as mock_asyncio_run,
+        patch("asynctasq.tasks.types.async_process_task.logger.warning") as mock_warning,
+    ):
+        # Act
+        result = task._run_async_in_process()
+
+        # Assert
+        assert result == 6
+        mock_asyncio_run.assert_called_once()
+        mock_warning.assert_called_once()
+        assert "Warm event loop not available" in mock_warning.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_async_process_task_fallback_counter_increments():
+    """Test fallback counter increments on each fallback."""
+    from unittest.mock import patch
+
+    # Arrange
+    task = SharedAsyncFactorialTask(n=2)
+
+    with (
+        patch(
+            "asynctasq.tasks.types.async_process_task.get_warm_event_loop",
+            return_value=None,
+        ),
+        patch(
+            "asynctasq.tasks.types.async_process_task.increment_fallback_count",
+            return_value=5,  # Simulate 5th fallback
+        ) as mock_increment,
+        patch("asynctasq.tasks.types.async_process_task.asyncio.run", return_value=2),
+        patch("asynctasq.tasks.types.async_process_task.logger.warning"),
+    ):
+        # Act
+        task._run_async_in_process()
+
+        # Assert
+        mock_increment.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_async_process_task_calls_get_async_pool():
+    """Test run() calls get_async_pool() to get process pool."""
+    from concurrent.futures import Future
+    from unittest.mock import MagicMock, patch
+
+    # Arrange
+    task = SharedAsyncFactorialTask(n=1)
+
+    # Create a real Future for the pool.submit() result
+    pool_future = Future()
+    pool_future.set_result(1)
+
+    mock_pool = MagicMock()
+    mock_pool.submit.return_value = pool_future
+
+    mock_manager = MagicMock()
+    mock_manager.get_async_pool.return_value = mock_pool
+
+    with patch(
+        "asynctasq.tasks.types.async_process_task.get_default_manager",
+        return_value=mock_manager,
+    ):
+        # Act
+        result = await task.run()
+
+        # Assert
+        assert result == 1
+        mock_manager.get_async_pool.assert_called_once()
+        mock_pool.submit.assert_called_once()
