@@ -193,3 +193,210 @@ class TestProcessPoolManagerValidation:
         error_msg = str(exc_info.value)
         # ProcessPoolExecutor validation error
         assert "max_workers" in error_msg.lower()
+
+
+@pytest.mark.unit
+class TestProcessPoolManagerAdvanced:
+    """Test ProcessPoolManager advanced features."""
+
+    @pytest.mark.asyncio
+    async def test_context_manager_async(self) -> None:
+        """Test ProcessPoolManager as async context manager."""
+        # Arrange & Act
+        async with ProcessPoolManager(sync_max_workers=2) as manager:
+            # Assert - should be initialized
+            assert manager.is_initialized()
+            pool = manager.get_sync_pool()
+            assert pool is not None
+
+        # Assert - should be shutdown after exit
+        assert not manager.is_initialized()
+
+    @pytest.mark.asyncio
+    async def test_initialize_warm_event_loop(self) -> None:
+        """Test initialize() sets up warm event loops."""
+        from unittest.mock import patch
+
+        # Arrange
+        manager = ProcessPoolManager(async_max_workers=2)
+
+        with patch("asynctasq.tasks.infrastructure.process_pool_manager.init_warm_event_loop"):
+            # Act
+            await manager.initialize()
+
+            # Assert - warm loop initializer passed to pool
+            assert manager.is_initialized()
+
+    @pytest.mark.asyncio
+    async def test_get_sync_pool_auto_initializes(self) -> None:
+        """Test get_sync_pool() auto-initializes if not initialized."""
+        # Arrange
+        manager = ProcessPoolManager(sync_max_workers=3)
+
+        # Act
+        pool = manager.get_sync_pool()
+
+        # Assert
+        assert pool is not None
+        assert manager.is_initialized()
+
+    @pytest.mark.asyncio
+    async def test_get_async_pool_auto_initializes(self) -> None:
+        """Test get_async_pool() auto-initializes if not initialized."""
+        # Arrange
+        manager = ProcessPoolManager(async_max_workers=3)
+
+        # Act
+        pool = manager.get_async_pool()
+
+        # Assert
+        assert pool is not None
+        assert manager.is_initialized()
+
+    @pytest.mark.asyncio
+    async def test_shutdown_with_cancel_futures(self) -> None:
+        """Test shutdown(cancel_futures=True) cancels pending futures."""
+        # Arrange
+        manager = ProcessPoolManager(sync_max_workers=2)
+        manager.get_sync_pool()
+
+        # Act
+        await manager.shutdown(wait=False, cancel_futures=True)
+
+        # Assert
+        assert not manager.is_initialized()
+
+    @pytest.mark.asyncio
+    async def test_fallback_count_functions(self) -> None:
+        """Test get_fallback_count() and increment_fallback_count()."""
+        from asynctasq.tasks.infrastructure.process_pool_manager import (
+            get_fallback_count,
+            increment_fallback_count,
+        )
+
+        # Arrange - get initial count
+        initial = get_fallback_count()
+
+        # Act
+        count1 = increment_fallback_count()
+        count2 = increment_fallback_count()
+        final = get_fallback_count()
+
+        # Assert
+        assert count1 == initial + 1
+        assert count2 == initial + 2
+        assert final == initial + 2
+
+    @pytest.mark.asyncio
+    async def test_get_warm_event_loop_returns_none_outside_process(self) -> None:
+        """Test get_warm_event_loop() returns None outside process pool."""
+        from asynctasq.tasks.infrastructure.process_pool_manager import get_warm_event_loop
+
+        # Act
+        loop = get_warm_event_loop()
+
+        # Assert (should be None in main process, not in subprocess)
+        assert loop is None
+
+    @pytest.mark.asyncio
+    async def test_get_default_manager_returns_singleton(self) -> None:
+        """Test get_default_manager() returns same instance."""
+        from asynctasq.tasks.infrastructure.process_pool_manager import get_default_manager
+
+        # Act
+        manager1 = get_default_manager()
+        manager2 = get_default_manager()
+
+        # Assert
+        assert manager1 is manager2
+
+    @pytest.mark.asyncio
+    async def test_set_default_manager_replaces_instance(self) -> None:
+        """Test set_default_manager() replaces default instance."""
+        from asynctasq.tasks.infrastructure.process_pool_manager import (
+            get_default_manager,
+            set_default_manager,
+        )
+
+        # Arrange
+        original = get_default_manager()
+        custom = ProcessPoolManager(sync_max_workers=8)
+
+        # Act
+        set_default_manager(custom)
+        new_default = get_default_manager()
+
+        # Assert
+        assert new_default is custom
+        assert new_default is not original
+
+        # Cleanup - restore original
+        set_default_manager(original)
+
+    @pytest.mark.asyncio
+    async def test_get_cpu_count_returns_positive_int(self) -> None:
+        """Test _get_cpu_count() returns positive integer."""
+        # Arrange
+        manager = ProcessPoolManager()
+
+        # Act
+        cpu_count = manager._get_cpu_count()
+
+        # Assert
+        assert isinstance(cpu_count, int)
+        assert cpu_count > 0
+
+    @pytest.mark.asyncio
+    async def test_manager_with_custom_mp_context(self) -> None:
+        """Test ProcessPoolManager with custom multiprocessing context."""
+        import multiprocessing as mp
+
+        # Arrange
+        ctx = mp.get_context("spawn")  # Force spawn method
+        manager = ProcessPoolManager(sync_max_workers=2, mp_context=ctx)
+
+        # Act
+        pool = manager.get_sync_pool()
+
+        # Assert
+        assert pool is not None
+        assert manager.is_initialized()
+
+    @pytest.mark.asyncio
+    async def test_async_pool_has_separate_config(self) -> None:
+        """Test async pool has independent configuration from sync pool."""
+        # Arrange
+        manager = ProcessPoolManager(
+            sync_max_workers=2,
+            async_max_workers=4,
+            sync_max_tasks_per_child=50,
+            async_max_tasks_per_child=100,
+        )
+
+        # Act
+        manager.get_sync_pool()
+        manager.get_async_pool()
+
+        # Assert
+        stats = manager.get_stats()
+        assert stats["sync"]["pool_size"] == 2
+        assert stats["async"]["pool_size"] == 4
+        assert stats["sync"]["max_tasks_per_child"] == 50
+        assert stats["async"]["max_tasks_per_child"] == 100
+
+    @pytest.mark.asyncio
+    async def test_get_stats_with_both_pools_initialized(self) -> None:
+        """Test get_stats() with both sync and async pools initialized."""
+        # Arrange
+        manager = ProcessPoolManager(sync_max_workers=3, async_max_workers=5)
+        manager.get_sync_pool()
+        manager.get_async_pool()
+
+        # Act
+        stats = manager.get_stats()
+
+        # Assert
+        assert stats["sync"]["status"] == "initialized"
+        assert stats["sync"]["pool_size"] == 3
+        assert stats["async"]["status"] == "initialized"
+        assert stats["async"]["pool_size"] == 5
