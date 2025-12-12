@@ -1,5 +1,5 @@
-<svg width="114.3" height="20" viewBox="0 0 1143 200" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" role="img" aria-label="Coverage: 80%">
-  <title>Coverage: 80%</title>
+<svg width="114.3" height="20" viewBox="0 0 1143 200" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" role="img" aria-label="Coverage: 92%">
+  <title>Coverage: 92%</title>
   <linearGradient id="a" x2="0" y2="100%">
     <stop offset="0" stop-opacity=".1" stop-color="#EEE"/>
     <stop offset="1" stop-opacity=".1"/>
@@ -7,14 +7,14 @@
   <mask id="m"><rect width="1143" height="200" rx="30" fill="#FFF"/></mask>
   <g mask="url(#m)">
     <rect width="783" height="200" fill="#555"/>
-    <rect width="360" height="200" fill="#DB1" x="783"/>
+    <rect width="360" height="200" fill="#3C1" x="783"/>
     <rect width="1143" height="200" fill="url(#a)"/>
   </g>
   <g aria-hidden="true" fill="#fff" text-anchor="start" font-family="Verdana,DejaVu Sans,sans-serif" font-size="110">
     <text x="220" y="148" textLength="523" fill="#000" opacity="0.25">Coverage</text>
     <text x="210" y="138" textLength="523">Coverage</text>
-    <text x="838" y="148" textLength="260" fill="#000" opacity="0.25">80%</text>
-    <text x="828" y="138" textLength="260">80%</text>
+    <text x="838" y="148" textLength="260" fill="#000" opacity="0.25">92%</text>
+    <text x="828" y="138" textLength="260">92%</text>
   </g>
   <image x="40" y="35" width="130" height="130" xlink:href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgd2lkdGg9IjI0IiBoZWlnaHQ9IjI0Ij4KICA8dGl0bGU+Q29kZTwvdGl0bGU+CiAgPGRlZnM+CiAgICA8c3R5bGU+PCFbQ0RBVEFbCiAgICAgIDpyb290eyAtLWN2LWJnOiNlMzYyMDk7IC0tY3YtYXJyb3c6I2ZmZmZmZiB9CiAgICAgIEBtZWRpYSAocHJlZmVycy1jb2xvci1zY2hlbWU6IGRhcmspIHsKICAgICAgICA6cm9vdHsgLS1jdi1iZzojZmZiNTdmOyAtLWN2LWFycm93OiMxYTFhMWEgfQogICAgICB9CiAgICBdXT48L3N0eWxlPgogIDwvZGVmcz4KICA8cmVjdCB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHJ4PSI0IiBmaWxsPSJ2YXIoLS1jdi1iZykiIC8+CiAgPHBhdGggZD0iTTkgOGw0IDQtNCA0IiBzdHJva2U9InZhcigtLWN2LWFycm93KSIgc3Ryb2tlLXdpZHRoPSIxLjUiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIgZmlsbD0ibm9uZSIvPgo8L3N2Zz4K"/>
 </svg>
