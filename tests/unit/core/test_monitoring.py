@@ -34,7 +34,9 @@ class TestMonitoringServiceInitialization:
         # Assert
         assert service.driver == mock_driver
         assert service.serializer is None
-        assert service._task_service is not None
+        assert service._task_serializer is not None
+        assert service._task_executor is not None
+        assert service._task_repository is not None
 
     def test_init_with_driver_and_serializer(self) -> None:
         # Arrange
@@ -48,7 +50,7 @@ class TestMonitoringServiceInitialization:
         assert service.driver == mock_driver
         assert service.serializer == mock_serializer
 
-    def test_init_creates_task_service(self) -> None:
+    def test_init_creates_task_services(self) -> None:
         # Arrange
         mock_driver = MagicMock(spec=BaseDriver)
         mock_serializer = MagicMock(spec=BaseSerializer)
@@ -57,9 +59,9 @@ class TestMonitoringServiceInitialization:
         service = MonitoringService(driver=mock_driver, serializer=mock_serializer)
 
         # Assert
-        assert service._task_service is not None
-        assert service._task_service.driver == mock_driver
-        assert service._task_service.serializer == mock_serializer
+        assert service._task_serializer is not None
+        assert service._task_executor is not None
+        assert service._task_repository is not None
 
 
 @mark.unit

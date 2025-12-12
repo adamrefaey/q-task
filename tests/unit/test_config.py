@@ -100,6 +100,7 @@ class TestEnvVarMapping:
             "default_timeout",
             "process_pool_size",
             "process_pool_max_tasks_per_child",
+            "task_scan_limit",
             "keep_completed_tasks",
         }
 

@@ -19,18 +19,18 @@ from asynctasq.core.events import EventType
 from asynctasq.core.worker import Worker
 from asynctasq.drivers.base_driver import BaseDriver
 from asynctasq.serializers import BaseSerializer, MsgpackSerializer
-from asynctasq.tasks import BaseTask, FunctionTask
+from asynctasq.tasks import AsyncTask, BaseTask, FunctionTask
 
 
 # Test implementations for abstract Task
-class ConcreteTask(BaseTask[str]):
+class ConcreteTask(AsyncTask[str]):
     """Concrete implementation of Task for testing."""
 
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.public_param = kwargs.get("public_param", "default")
 
-    async def handle(self) -> str:
+    async def execute(self) -> str:
         """Test implementation."""
         return "success"
 
@@ -159,7 +159,7 @@ class TestWorkerStart:
         # Act
         with (
             patch.object(worker, "_run", new_callable=AsyncMock) as mock_run,
-            patch("asynctasq.core.worker.asyncio.get_event_loop") as mock_get_loop,
+            patch("asynctasq.core.worker.asyncio.get_running_loop") as mock_get_loop,
         ):
             mock_loop = MagicMock()
             mock_get_loop.return_value = mock_loop
@@ -591,14 +591,14 @@ class TestWorkerProcessTask:
 
         task = ConcreteTask(public_param="test")
         task._task_id = "test-task-123"  # Set task_id as deserialization would
-        task.timeout = 1
+        task.config.timeout = 1
         task_data = b"serialized_task"
 
-        async def slow_handle():
+        async def slow_execute():
             await asyncio.sleep(1.2)  # Exceeds timeout
             return "success"
 
-        task.handle = slow_handle  # type: ignore[assignment]
+        task.execute = slow_execute  # type: ignore[assignment]
 
         with (
             patch.object(worker, "_deserialize_task", return_value=task),
@@ -622,7 +622,7 @@ class TestWorkerProcessTask:
 
         task = ConcreteTask(public_param="test")
         task._task_id = "test-task-123"  # Set task_id as deserialization would
-        task.timeout = None
+        task.config.timeout = None
         task_data = b"serialized_task"
 
         with patch.object(worker, "_deserialize_task", return_value=task):
@@ -642,10 +642,10 @@ class TestWorkerProcessTask:
         task = ConcreteTask(public_param="test")
         task._task_id = "test-task-123"  # Set task_id as deserialization would
 
-        async def failing_handle():
+        async def failing_execute():
             raise ValueError("Test error")
 
-        task.handle = failing_handle  # type: ignore[assignment]
+        task.execute = failing_execute  # type: ignore[assignment]
         task_data = b"serialized_task"
 
         with (
@@ -848,10 +848,10 @@ class TestWorkerProcessTask:
         task = ConcreteTask(public_param="test")
         task._task_id = "test-id"
 
-        async def failing_handle():
+        async def failing_execute():
             raise ImportError("Module not found")
 
-        task.handle = failing_handle  # type: ignore[assignment]
+        task.execute = failing_execute  # type: ignore[assignment]
         task_data = b"serialized_task"
 
         with (
@@ -877,10 +877,10 @@ class TestWorkerProcessTask:
         task = ConcreteTask(public_param="test")
         task._task_id = "test-id"
 
-        async def failing_handle():
+        async def failing_execute():
             raise AttributeError("Attribute not found")
 
-        task.handle = failing_handle  # type: ignore[assignment]
+        task.execute = failing_execute  # type: ignore[assignment]
         task_data = b"serialized_task"
 
         with (
@@ -911,13 +911,13 @@ class TestWorkerHandleTaskFailure:
 
         task = ConcreteTask(public_param="test")
         task._attempts = 0
-        task.max_retries = 3
-        task.retry_delay = 60
-        task.queue = "test_queue"
+        task.config.max_retries = 3
+        task.config.retry_delay = 60
+        task.config.queue = "test_queue"
         exception = ValueError("Test error")
         start_time = datetime.now(UTC)
 
-        with patch.object(worker._task_service, "serialize_task", return_value=b"serialized"):
+        with patch.object(worker._task_serializer, "serialize", return_value=b"serialized"):
             # Act
             await worker._handle_task_failure(
                 task, exception, "test_queue", start_time, b"task_data"
@@ -936,7 +936,7 @@ class TestWorkerHandleTaskFailure:
 
         task = ConcreteTask(public_param="test")
         task._attempts = 2
-        task.max_retries = 2
+        task.config.max_retries = 2
         exception = ValueError("Test error")
         start_time = datetime.now(UTC)
 
@@ -959,7 +959,7 @@ class TestWorkerHandleTaskFailure:
 
         task = ConcreteTask(public_param="test")
         task._attempts = 0
-        task.max_retries = 3
+        task.config.max_retries = 3
         start_time = datetime.now(UTC)
 
         def should_retry_false(exception: Exception) -> bool:
@@ -987,7 +987,7 @@ class TestWorkerHandleTaskFailure:
 
         task = ConcreteTask(public_param="test")
         task._attempts = 2
-        task.max_retries = 2
+        task.config.max_retries = 2
         exception = ValueError("Test error")
         start_time = datetime.now(UTC)
 
@@ -1008,7 +1008,7 @@ class TestWorkerHandleTaskFailure:
 
         task = ConcreteTask(public_param="test")
         task._attempts = 2
-        task.max_retries = 2
+        task.config.max_retries = 2
         exception = ValueError("Test error")
         start_time = datetime.now(UTC)
 
@@ -1032,17 +1032,17 @@ class TestWorkerHandleTaskFailure:
 
         task = ConcreteTask(public_param="test")
         task._attempts = 0
-        task.max_retries = 3
-        task.retry_delay = 60
-        task.queue = "test_queue"
+        task.config.max_retries = 3
+        task.config.retry_delay = 60
+        task.config.queue = "test_queue"
         exception = ValueError("Test error")
         start_time = datetime.now(UTC)
 
         # Mock serialize to raise exception
         with (
             patch.object(
-                worker._task_service,
-                "serialize_task",
+                worker._task_serializer,
+                "serialize",
                 side_effect=ValueError("Serialization failed"),
             ),
             patch("asynctasq.core.worker.logger"),
@@ -1063,16 +1063,16 @@ class TestWorkerHandleTaskFailure:
 
         task = ConcreteTask(public_param="test")
         task._attempts = 0
-        task.max_retries = 3
-        task.retry_delay = 60
-        task.queue = "test_queue"
+        task.config.max_retries = 3
+        task.config.retry_delay = 60
+        task.config.queue = "test_queue"
         exception = ValueError("Test error")
         start_time = datetime.now(UTC)
 
         # Mock enqueue to raise exception
         mock_driver.enqueue = AsyncMock(side_effect=RuntimeError("Enqueue failed"))
 
-        with patch.object(worker._task_service, "serialize_task", return_value=b"serialized"):
+        with patch.object(worker._task_serializer, "serialize", return_value=b"serialized"):
             # Act & Assert
             # Exception should propagate (not caught in current implementation)
             with raises(RuntimeError, match="Enqueue failed"):
@@ -1099,6 +1099,7 @@ class TestWorkerDeserializeTask:
                 "task_id": "test-task-id",
                 "attempts": 2,
                 "dispatched_at": "2024-01-01T12:00:00+00:00",
+                "queue": "default",
                 "max_retries": 5,
                 "retry_delay": 120,
                 "timeout": 300,
@@ -1114,9 +1115,9 @@ class TestWorkerDeserializeTask:
         assert result.public_param == "test_value"
         assert result._task_id == "test-task-id"
         assert result._attempts == 2
-        assert result.max_retries == 5
-        assert result.retry_delay == 120
-        assert result.timeout == 300
+        assert result.config.max_retries == 5
+        assert result.config.retry_delay == 120
+        assert result.config.timeout == 300
         assert isinstance(result._dispatched_at, datetime)
 
     @mark.asyncio
@@ -1133,6 +1134,10 @@ class TestWorkerDeserializeTask:
                 "task_id": "test-id",
                 "attempts": 0,
                 "dispatched_at": None,
+                "queue": "default",
+                "max_retries": 3,
+                "retry_delay": 60,
+                "timeout": None,
             },
         }
         mock_serializer.deserialize.return_value = task_data
@@ -1157,6 +1162,10 @@ class TestWorkerDeserializeTask:
                 "task_id": "test-id",
                 "attempts": 0,
                 "dispatched_at": "",
+                "queue": "default",
+                "max_retries": 3,
+                "retry_delay": 60,
+                "timeout": None,
             },
         }
         mock_serializer.deserialize.return_value = task_data
@@ -1181,6 +1190,10 @@ class TestWorkerDeserializeTask:
                 "task_id": "test-id",
                 "attempts": 0,
                 "dispatched_at": "invalid-datetime-format",
+                "queue": "default",
+                "max_retries": 3,
+                "retry_delay": 60,
+                "timeout": None,
             },
         }
         mock_serializer.deserialize.return_value = task_data
@@ -1205,6 +1218,10 @@ class TestWorkerDeserializeTask:
                 "task_id": "test-id",
                 "attempts": 0,
                 "dispatched_at": 12345,  # Wrong type (should be string)
+                "queue": "default",
+                "max_retries": 3,
+                "retry_delay": 60,
+                "timeout": None,
             },
         }
         mock_serializer.deserialize.return_value = task_data
@@ -1228,7 +1245,10 @@ class TestWorkerDeserializeTask:
             "metadata": {
                 "task_id": "test-id",
                 "attempts": 1,
-                # Missing max_retries, retry_delay, timeout
+                "queue": "default",
+                "max_retries": 3,
+                "retry_delay": 60,
+                "timeout": None,
             },
         }
         mock_serializer.deserialize.return_value = task_data
@@ -1240,8 +1260,8 @@ class TestWorkerDeserializeTask:
         assert result._task_id == "test-id"
         assert result._attempts == 1
         # Should use class defaults for missing config
-        assert result.max_retries == 3  # Default from Task class
-        assert result.retry_delay == 60  # Default from Task class
+        assert result.config.max_retries == 3  # Default from Task class
+        assert result.config.retry_delay == 60  # Default from Task class
 
     @mark.asyncio
     async def test_deserialize_task_restores_task_configuration(self) -> None:
@@ -1256,6 +1276,7 @@ class TestWorkerDeserializeTask:
             "metadata": {
                 "task_id": "test-id",
                 "attempts": 0,
+                "queue": "default",
                 "max_retries": 10,
                 "retry_delay": 180,
                 "timeout": 600,
@@ -1267,9 +1288,9 @@ class TestWorkerDeserializeTask:
         result = await worker._deserialize_task(b"serialized_data")
 
         # Assert
-        assert result.max_retries == 10
-        assert result.retry_delay == 180
-        assert result.timeout == 600
+        assert result.config.max_retries == 10
+        assert result.config.retry_delay == 180
+        assert result.config.timeout == 600
 
     @mark.asyncio
     async def test_deserialize_task_handles_missing_class_in_data(self) -> None:
@@ -1327,6 +1348,10 @@ class TestWorkerDeserializeTask:
             "metadata": {
                 "task_id": "test-id",
                 "attempts": 0,
+                "queue": "default",
+                "max_retries": 3,
+                "retry_delay": 60,
+                "timeout": None,
                 "func_module": func_module_name,
                 "func_name": func_name,
             },
@@ -1349,25 +1374,26 @@ class TestWorkerDeserializeTask:
         mock_serializer = MagicMock(spec=BaseSerializer)
         worker = Worker(queue_driver=mock_driver, serializer=mock_serializer)
 
-        # FunctionTask without func_module/func_name should not try to restore func
+        # FunctionTask without func_module/func_name should raise ValueError
         task_data = {
             "class": f"{FunctionTask.__module__}.{FunctionTask.__name__}",
             "params": {"args": (), "kwargs": {}},
             "metadata": {
                 "task_id": "test-id",
                 "attempts": 0,
+                "queue": "default",
+                "max_retries": 3,
+                "retry_delay": 60,
+                "timeout": None,
                 # Missing func_module and func_name
             },
         }
         mock_serializer.deserialize.return_value = task_data
 
-        # Act
-        result = await worker._deserialize_task(b"serialized_data")
-
-        # Assert
-        assert isinstance(result, FunctionTask)
-        # func should not be set (will cause error if handle() is called, but that's expected)
-        assert not hasattr(result, "func") or result.func is None
+        # Act & Assert
+        # FunctionTask requires func, so missing metadata should raise ValueError
+        with raises(ValueError):
+            await worker._deserialize_task(b"serialized_data")
 
     @mark.asyncio
     async def test_deserialize_task_handles_function_task_with_missing_func_in_module(self) -> None:
@@ -1382,6 +1408,10 @@ class TestWorkerDeserializeTask:
             "metadata": {
                 "task_id": "test-id",
                 "attempts": 0,
+                "queue": "default",
+                "max_retries": 3,
+                "retry_delay": 60,
+                "timeout": None,
                 "func_module": "nonexistent_module",
                 "func_name": "nonexistent_func",
             },
@@ -1414,6 +1444,10 @@ class TestWorkerDeserializeTask:
                 "metadata": {
                     "task_id": "test-id",
                     "attempts": 0,
+                    "queue": "default",
+                    "max_retries": 3,
+                    "retry_delay": 60,
+                    "timeout": None,
                     "func_module": "__main__",
                     "func_name": "test_func",
                     "func_file": str(temp_file),
@@ -1446,6 +1480,10 @@ class TestWorkerDeserializeTask:
             "metadata": {
                 "task_id": "test-id",
                 "attempts": 0,
+                "queue": "default",
+                "max_retries": 3,
+                "retry_delay": 60,
+                "timeout": None,
                 "func_module": "__main__",
                 "func_name": "test_func",
                 "func_file": "/nonexistent/path/to/file.py",
@@ -1462,7 +1500,7 @@ class TestWorkerDeserializeTask:
 
 @mark.unit
 class TestWorkerSerializeTask:
-    """Test TaskService.serialize_task() method via Worker._task_service."""
+    """Test TaskSerializer.serialize() method via Worker._task_serializer."""
 
     @mark.asyncio
     async def test_serialize_task_includes_all_metadata(self) -> None:
@@ -1476,12 +1514,12 @@ class TestWorkerSerializeTask:
         task._task_id = "test-task-id"
         task._attempts = 2
         task._dispatched_at = datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC)
-        task.max_retries = 5
-        task.retry_delay = 120
-        task.timeout = 300
+        task.config.max_retries = 5
+        task.config.retry_delay = 120
+        task.config.timeout = 300
 
         # Act
-        result = worker._task_service.serialize_task(task)
+        result = worker._task_serializer.serialize(task)
 
         # Assert
         mock_serializer.serialize.assert_called_once()
@@ -1509,7 +1547,7 @@ class TestWorkerSerializeTask:
         task._private_attr = "should_not_be_included"  # type: ignore[attr-defined]
 
         # Act
-        worker._task_service.serialize_task(task)
+        worker._task_serializer.serialize(task)
 
         # Assert
         call_arg = mock_serializer.serialize.call_args[0][0]
@@ -1532,7 +1570,7 @@ class TestWorkerSerializeTask:
         task._dispatched_at = None
 
         # Act
-        worker._task_service.serialize_task(task)
+        worker._task_serializer.serialize(task)
 
         # Assert
         call_arg = mock_serializer.serialize.call_args[0][0]
@@ -1551,7 +1589,7 @@ class TestWorkerSerializeTask:
 
         # Act & Assert
         with raises(ValueError, match="Serialization error"):
-            worker._task_service.serialize_task(task)
+            worker._task_serializer.serialize(task)
 
     @mark.asyncio
     async def test_deserialize_task_handles_serializer_exception(self) -> None:
@@ -1711,6 +1749,10 @@ class TestWorkerIntegration:
                 "task_id": "test-id",
                 "attempts": 0,
                 "dispatched_at": None,
+                "queue": "test_queue",
+                "max_retries": 3,
+                "retry_delay": 60,
+                "timeout": None,
             },
         }
         serialized = b"serialized_task"
@@ -1758,6 +1800,10 @@ class TestWorkerIntegration:
                 "task_id": "test-id",
                 "attempts": 0,
                 "dispatched_at": None,
+                "queue": "test_queue",
+                "max_retries": 3,
+                "retry_delay": 60,
+                "timeout": None,
             },
         }
         serialized = b"serialized_task"
@@ -1811,9 +1857,9 @@ class TestWorkerIntegration:
         task = ConcreteTask(public_param="test")
         task._task_id = "test-id"
         task._attempts = 0  # First attempt
-        task.max_retries = 3  # Allow up to 3 retries
-        task.retry_delay = 60  # 60 second delay before retry
-        task.queue = "test_queue"
+        task.config.max_retries = 3  # Allow up to 3 retries
+        task.config.retry_delay = 60  # 60 second delay before retry
+        task.config.queue = "test_queue"
 
         # Task data structure for deserialization
         # Note: queue must be in metadata for _deserialize_task to restore it
@@ -1834,23 +1880,23 @@ class TestWorkerIntegration:
         mock_serializer.serialize.return_value = serialized
 
         # CRITICAL: When _deserialize_task is called, it creates a NEW task instance.
-        # The deserialized task will have the default handle() method which succeeds.
-        # We need to patch _deserialize_task to return a task with a failing handle method.
+        # The deserialized task will have the default execute() method which succeeds.
+        # We need to patch _deserialize_task to return a task with a failing execute method.
         async def make_task_fail():
             raise ValueError("Test error")
 
         original_deserialize = worker._deserialize_task
 
-        async def deserialize_with_failing_handle(task_data: bytes) -> BaseTask:
+        async def deserialize_with_failing_execute(task_data: bytes) -> BaseTask:
             # Deserialize the task normally
             deserialized_task = await original_deserialize(task_data)
-            # Set the failing handle on the deserialized instance
+            # Set the failing execute on the deserialized instance
             # This is critical: the deserialized task is a NEW instance,
-            # so it doesn't have the custom handle we set on the original task
-            deserialized_task.handle = make_task_fail  # type: ignore[assignment]
+            # so it doesn't have the custom execute we set on the original task
+            deserialized_task.execute = make_task_fail  # type: ignore[assignment]
             return deserialized_task
 
-        worker._deserialize_task = deserialize_with_failing_handle  # type: ignore[assignment]
+        worker._deserialize_task = deserialize_with_failing_execute  # type: ignore[assignment]
 
         # Track when the task has been processed (including failure handling)
         processing_done = asyncio.Event()
@@ -2052,7 +2098,7 @@ class TestWorkerEventEmission:
         task._task_id = "task-123"
 
         with patch.object(worker, "_deserialize_task", return_value=task):
-            with patch.object(worker._task_service, "execute_task", new_callable=AsyncMock):
+            with patch.object(worker._task_executor, "execute", new_callable=AsyncMock):
                 # Act
                 await worker._process_task(b"task_data", "test_queue")
 
@@ -2079,7 +2125,7 @@ class TestWorkerEventEmission:
         task._task_id = "task-123"
 
         with patch.object(worker, "_deserialize_task", return_value=task):
-            with patch.object(worker._task_service, "execute_task", new_callable=AsyncMock):
+            with patch.object(worker._task_executor, "execute", new_callable=AsyncMock):
                 # Act
                 await worker._process_task(b"task_data", "test_queue")
 
@@ -2103,12 +2149,12 @@ class TestWorkerEventEmission:
         task = ConcreteTask(public_param="test")
         task._task_id = "task-123"
         task._attempts = 0
-        task.max_retries = 3
-        task.queue = "test_queue"
+        task.config.max_retries = 3
+        task.config.queue = "test_queue"
         exception = ValueError("Test error")
         start_time = datetime.now(UTC)
 
-        with patch.object(worker._task_service, "serialize_task", return_value=b"serialized"):
+        with patch.object(worker._task_serializer, "serialize", return_value=b"serialized"):
             # Act
             await worker._handle_task_failure(
                 task, exception, "test_queue", start_time, b"task_data"
@@ -2131,7 +2177,7 @@ class TestWorkerEventEmission:
         task = ConcreteTask(public_param="test")
         task._task_id = "task-123"
         task._attempts = 2
-        task.max_retries = 2
+        task.config.max_retries = 2
         exception = ValueError("Test error")
         start_time = datetime.now(UTC)
         task.failed = AsyncMock()  # type: ignore[assignment]
@@ -2183,7 +2229,7 @@ class TestWorkerAckTimeout:
 
         with (
             patch.object(worker, "_deserialize_task", return_value=task),
-            patch.object(worker._task_service, "execute_task", new_callable=AsyncMock),
+            patch.object(worker._task_executor, "execute", new_callable=AsyncMock),
             patch("asynctasq.core.worker.logger") as mock_logger,
         ):
             # Act
@@ -2208,7 +2254,7 @@ class TestWorkerAckTimeout:
 
         with (
             patch.object(worker, "_deserialize_task", return_value=task),
-            patch.object(worker._task_service, "execute_task", new_callable=AsyncMock),
+            patch.object(worker._task_executor, "execute", new_callable=AsyncMock),
             patch("asynctasq.core.worker.logger") as mock_logger,
         ):
             # Act
@@ -2218,6 +2264,159 @@ class TestWorkerAckTimeout:
         mock_logger.error.assert_called()
         # Task should still be marked as processed
         assert worker._tasks_processed == 1
+
+
+@mark.unit
+class TestWorkerHealthStatus:
+    """Test Worker.get_health_status() method."""
+
+    def test_get_health_status_not_started(self) -> None:
+        """Test health status when worker not started."""
+        mock_driver = MagicMock()
+        mock_driver.connect = AsyncMock()
+        mock_driver.disconnect = AsyncMock()
+        mock_driver.dequeue = AsyncMock(return_value=None)
+
+        worker = Worker(
+            queue_driver=mock_driver,
+            queues=["default", "high-priority"],
+            concurrency=10,
+        )
+
+        health = worker.get_health_status()
+
+        assert health["worker_id"] == worker.worker_id
+        assert health["hostname"] == worker.hostname
+        assert health["uptime_seconds"] == 0  # Not started
+        assert health["tasks_processed"] == 0
+        assert health["active_tasks"] == 0
+        assert health["queues"] == ["default", "high-priority"]
+        assert "process_pool" in health
+
+    def test_get_health_status_running(self) -> None:
+        """Test health status while worker is running."""
+        mock_driver = MagicMock()
+        mock_driver.connect = AsyncMock()
+        mock_driver.disconnect = AsyncMock()
+        mock_driver.dequeue = AsyncMock(return_value=None)
+
+        worker = Worker(
+            queue_driver=mock_driver,
+            queues=["default"],
+            concurrency=5,
+        )
+
+        # Simulate that worker has started (set start time without actually starting)
+        worker._start_time = datetime.now(UTC)
+
+        health = worker.get_health_status()
+
+        assert health["worker_id"] == worker.worker_id
+        assert health["uptime_seconds"] >= 0
+        assert health["tasks_processed"] == 0
+        assert health["active_tasks"] == 0
+        assert health["queues"] == ["default"]
+
+    def test_get_health_status_includes_pool_stats(self) -> None:
+        """Test that health status includes process pool stats."""
+        from asynctasq.tasks.infrastructure.process_pool_manager import ProcessPoolManager
+
+        mock_driver = MagicMock()
+        mock_driver.connect = AsyncMock()
+        mock_driver.disconnect = AsyncMock()
+        mock_driver.dequeue = AsyncMock(return_value=None)
+
+        worker = Worker(queue_driver=mock_driver)
+
+        # Initialize pool
+        ProcessPoolManager.initialize_sync_pool(max_workers=4, max_tasks_per_child=100)
+
+        try:
+            health = worker.get_health_status()
+
+            # Verify process pool info
+            assert "process_pool" in health
+            pool_info = health["process_pool"]
+            assert pool_info["sync"]["status"] == "initialized"
+            assert pool_info["sync"]["pool_size"] == 4
+            assert pool_info["sync"]["max_tasks_per_child"] == 100
+        finally:
+            # Cleanup
+            ProcessPoolManager.shutdown_pools()
+
+    def test_get_health_status_pool_not_initialized(self) -> None:
+        """Test health status when process pool not initialized."""
+        from asynctasq.tasks.infrastructure.process_pool_manager import ProcessPoolManager
+
+        # Ensure pool is not initialized
+        if ProcessPoolManager.is_initialized():
+            ProcessPoolManager.shutdown_pools()
+
+        mock_driver = MagicMock()
+        mock_driver.connect = AsyncMock()
+        mock_driver.disconnect = AsyncMock()
+        mock_driver.dequeue = AsyncMock(return_value=None)
+
+        worker = Worker(queue_driver=mock_driver)
+        health = worker.get_health_status()
+
+        # Pool should show as not initialized (both sync and async)
+        assert health["process_pool"]["sync"]["status"] == "not_initialized"
+        assert health["process_pool"]["async"]["status"] == "not_initialized"
+
+    def test_get_health_status_with_custom_worker_id(self) -> None:
+        """Test health status with custom worker ID."""
+        mock_driver = MagicMock()
+        mock_driver.connect = AsyncMock()
+        mock_driver.disconnect = AsyncMock()
+        mock_driver.dequeue = AsyncMock(return_value=None)
+
+        worker = Worker(
+            queue_driver=mock_driver,
+            worker_id="custom-worker-123",
+        )
+
+        health = worker.get_health_status()
+
+        assert health["worker_id"] == "custom-worker-123"
+
+    def test_get_health_status_multiple_queues(self) -> None:
+        """Test health status with multiple queues."""
+        mock_driver = MagicMock()
+        mock_driver.connect = AsyncMock()
+        mock_driver.disconnect = AsyncMock()
+        mock_driver.dequeue = AsyncMock(return_value=None)
+
+        queues = ["queue1", "queue2", "queue3"]
+        worker = Worker(queue_driver=mock_driver, queues=queues)
+
+        health = worker.get_health_status()
+
+        assert health["queues"] == queues
+
+    def test_get_health_status_uptime_calculation(self) -> None:
+        """Test uptime calculation in health status."""
+        from datetime import timedelta
+
+        mock_driver = MagicMock()
+        mock_driver.connect = AsyncMock()
+        mock_driver.disconnect = AsyncMock()
+        mock_driver.dequeue = AsyncMock(return_value=None)
+
+        with patch("asynctasq.core.worker.datetime") as mock_datetime:
+            # Mock time progression
+            start_time = datetime.now(UTC)
+            current_time = start_time + timedelta(seconds=3600)  # 1 hour later
+
+            mock_datetime.now.return_value = current_time
+
+            worker = Worker(queue_driver=mock_driver)
+            worker._start_time = start_time
+
+            health = worker.get_health_status()
+
+            # Should show 1 hour (3600 seconds)
+            assert health["uptime_seconds"] == 3600
 
 
 if __name__ == "__main__":

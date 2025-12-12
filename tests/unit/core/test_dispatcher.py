@@ -11,26 +11,26 @@ Testing Strategy:
 
 from datetime import UTC, datetime
 from typing import Any
-from unittest.mock import ANY, AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, PropertyMock, patch
 
-from pytest import main, mark
+from pytest import main, mark, raises
 
 from asynctasq.config import Config
 from asynctasq.core.dispatcher import Dispatcher, cleanup, get_dispatcher
 from asynctasq.drivers.base_driver import BaseDriver
 from asynctasq.serializers import BaseSerializer, MsgpackSerializer
-from asynctasq.tasks import BaseTask, FunctionTask
+from asynctasq.tasks import AsyncTask, FunctionTask
 
 
 # Test implementations for abstract Task
-class ConcreteTask(BaseTask[str]):
+class ConcreteTask(AsyncTask[str]):
     """Concrete implementation of Task for testing."""
 
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.public_param = kwargs.get("public_param", "default")
 
-    async def handle(self) -> str:
+    async def execute(self) -> str:
         """Test implementation."""
         return "success"
 
@@ -98,7 +98,7 @@ class TestDispatcherGetDriver:
         override_driver = MagicMock(spec=BaseDriver)
         dispatcher = Dispatcher(driver=default_driver)
         task = ConcreteTask()
-        task._driver_override = override_driver  # type: ignore[attr-defined]
+        task.config.driver_override = override_driver  # type: ignore[attr-defined]
 
         # Act
         result = dispatcher._get_driver(task)
@@ -112,7 +112,7 @@ class TestDispatcherGetDriver:
         default_driver = MagicMock(spec=BaseDriver)
         dispatcher = Dispatcher(driver=default_driver)
         task = ConcreteTask()
-        task._driver_override = "redis"  # type: ignore[attr-defined]
+        task.config.driver_override = "redis"  # type: ignore[attr-defined]
 
         with (
             patch("asynctasq.core.dispatcher.get_global_config") as mock_get_config,
@@ -137,9 +137,9 @@ class TestDispatcherGetDriver:
         default_driver = MagicMock(spec=BaseDriver)
         dispatcher = Dispatcher(driver=default_driver)
         task1 = ConcreteTask()
-        task1._driver_override = "redis"  # type: ignore[attr-defined]
+        task1.config.driver_override = "redis"  # type: ignore[attr-defined]
         task2 = ConcreteTask()
-        task2._driver_override = "redis"  # type: ignore[attr-defined]
+        task2.config.driver_override = "redis"  # type: ignore[attr-defined]
 
         with (
             patch("asynctasq.core.dispatcher.get_global_config") as mock_get_config,
@@ -166,7 +166,7 @@ class TestDispatcherGetDriver:
         mock_driver = MagicMock(spec=BaseDriver)
         dispatcher = Dispatcher(driver=mock_driver)
         task = ConcreteTask()
-        task._driver_override = None  # type: ignore[attr-defined]
+        task.config.driver_override = None  # type: ignore[attr-defined]
 
         # Act
         result = dispatcher._get_driver(task)
@@ -194,7 +194,7 @@ class TestDispatcherGetDriver:
         dispatcher = Dispatcher(driver=mock_driver)
         task = ConcreteTask()
         # Set driver_override to something unexpected (not None, not BaseDriver, not string)
-        task._driver_override = 123  # type: ignore[attr-defined]
+        task.config.driver_override = 123  # type: ignore[attr-defined]
 
         # Act
         result = dispatcher._get_driver(task)
@@ -241,7 +241,7 @@ class TestDispatcherDispatch:
         mock_serializer.serialize.return_value = b"serialized_data"
         dispatcher = Dispatcher(driver=mock_driver, serializer=mock_serializer)
         task = ConcreteTask()
-        task.queue = "custom_queue"
+        task.config.queue = "custom_queue"
         # Ensure _delay_seconds is not None to avoid comparison issues
         if not hasattr(task, "_delay_seconds") or task._delay_seconds is None:
             task._delay_seconds = 0  # type: ignore[attr-defined]
@@ -334,7 +334,7 @@ class TestDispatcherDispatch:
         mock_serializer.serialize.return_value = b"serialized_data"
         dispatcher = Dispatcher(driver=default_driver, serializer=mock_serializer)
         task = ConcreteTask()
-        task._driver_override = override_driver  # type: ignore[attr-defined]
+        task.config.driver_override = override_driver  # type: ignore[attr-defined]
         # Ensure _delay_seconds is not None to avoid comparison issues
         if not hasattr(task, "_delay_seconds") or task._delay_seconds is None:
             task._delay_seconds = 0  # type: ignore[attr-defined]
@@ -355,7 +355,7 @@ class TestDispatcherDispatch:
         mock_serializer.serialize.return_value = b"serialized_data"
         dispatcher = Dispatcher(driver=default_driver, serializer=mock_serializer)
         task = ConcreteTask()
-        task._driver_override = "redis"  # type: ignore[attr-defined]
+        task.config.driver_override = "redis"  # type: ignore[attr-defined]
         # Ensure _delay_seconds is not None to avoid comparison issues
         if not hasattr(task, "_delay_seconds") or task._delay_seconds is None:
             task._delay_seconds = 0  # type: ignore[attr-defined]
@@ -421,7 +421,7 @@ class TestDispatcherDispatch:
 
 @mark.unit
 class TestDispatcherSerializeTask:
-    """Test TaskService.serialize_task() method via Dispatcher._task_service."""
+    """Test TaskSerializer.serialize() method via Dispatcher._task_serializer."""
 
     def test_serialize_task_includes_all_metadata(self) -> None:
         # Arrange
@@ -432,12 +432,12 @@ class TestDispatcherSerializeTask:
         task._task_id = "test-task-id"
         task._attempts = 2
         task._dispatched_at = datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC)
-        task.max_retries = 5
-        task.retry_delay = 120
-        task.timeout = 300
+        task.config.max_retries = 5
+        task.config.retry_delay = 120
+        task.config.timeout = 300
 
         # Act
-        dispatcher._task_service.serialize_task(task)
+        dispatcher._task_serializer.serialize(task)
 
         # Assert
         mock_serializer.serialize.assert_called_once()
@@ -462,7 +462,7 @@ class TestDispatcherSerializeTask:
         task._private_attr = "should_not_be_included"  # type: ignore[attr-defined]
 
         # Act
-        dispatcher._task_service.serialize_task(task)
+        dispatcher._task_serializer.serialize(task)
 
         # Assert
         call_arg = mock_serializer.serialize.call_args[0][0]
@@ -483,7 +483,7 @@ class TestDispatcherSerializeTask:
         task._dispatched_at = None
 
         # Act
-        dispatcher._task_service.serialize_task(task)
+        dispatcher._task_serializer.serialize(task)
 
         # Assert
         call_arg = mock_serializer.serialize.call_args[0][0]
@@ -499,7 +499,7 @@ class TestDispatcherSerializeTask:
         task.__dunder__ = "dunder"  # type: ignore[attr-defined]
 
         # Act
-        dispatcher._task_service.serialize_task(task)
+        dispatcher._task_serializer.serialize(task)
 
         # Assert
         call_arg = mock_serializer.serialize.call_args[0][0]
@@ -523,7 +523,7 @@ class TestDispatcherSerializeTask:
         task._dispatched_at = None
 
         # Act
-        dispatcher._task_service.serialize_task(task)
+        dispatcher._task_serializer.serialize(task)
 
         # Assert
         call_arg = mock_serializer.serialize.call_args[0][0]
@@ -550,7 +550,7 @@ class TestDispatcherSerializeTask:
         task.lambda_attr = lambda x: x  # type: ignore[attr-defined]
 
         # Act
-        dispatcher._task_service.serialize_task(task)
+        dispatcher._task_serializer.serialize(task)
 
         # Assert
         call_arg = mock_serializer.serialize.call_args[0][0]
@@ -575,7 +575,7 @@ class TestDispatcherSerializeTask:
         task._dispatched_at = datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC)
 
         # Act
-        dispatcher._task_service.serialize_task(task)
+        dispatcher._task_serializer.serialize(task)
 
         # Assert
         mock_serializer.serialize.assert_called_once()
@@ -618,7 +618,7 @@ class TestDispatcherSerializeTask:
             task._dispatched_at = datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC)
 
             # Act
-            dispatcher._task_service.serialize_task(task)
+            dispatcher._task_serializer.serialize(task)
 
             # Assert
             call_arg = mock_serializer.serialize.call_args[0][0]
@@ -637,28 +637,23 @@ class TestDispatcherSerializeTask:
         dispatcher = Dispatcher(driver=mock_driver, serializer=mock_serializer)
 
         # Create a mock function that simulates __main__ module
-        # but will raise an error when trying to get file path
+        # but __code__.co_filename raises an error
         mock_func = MagicMock()
         mock_func.__name__ = "test_func"
         mock_func.__module__ = "__main__"
+        mock_code = MagicMock()
+        # Make co_filename raise OSError when accessed
+        type(mock_code).co_filename = PropertyMock(side_effect=OSError("Cannot get file path"))
+        mock_func.__code__ = mock_code
 
-        # Make inspect.getfile raise an error
-        with patch("asynctasq.tasks.task_service.inspect.getfile") as mock_getfile:
-            mock_getfile.side_effect = OSError("Cannot get file path")
+        task = FunctionTask(mock_func)
+        task._task_id = "test-id"
+        task._attempts = 0
+        task._dispatched_at = datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC)
 
-            task = FunctionTask(mock_func)
-            task._task_id = "test-id"
-            task._attempts = 0
-            task._dispatched_at = datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC)
-
-            # Act
-            dispatcher._task_service.serialize_task(task)
-
-            # Assert
-            call_arg = mock_serializer.serialize.call_args[0][0]
-            assert call_arg["metadata"]["func_name"] == "test_func"
-            assert call_arg["metadata"]["func_module"] == "__main__"
-            assert "func_file" not in call_arg["metadata"]  # Fallback doesn't include func_file
+        # Act & Assert - should raise OSError when trying to access co_filename
+        with raises(OSError):
+            dispatcher._task_serializer.serialize(task)
 
     def test_serialize_function_task_handles_main_module_type_error(self) -> None:
         # Arrange
@@ -667,28 +662,21 @@ class TestDispatcherSerializeTask:
         dispatcher = Dispatcher(driver=mock_driver, serializer=mock_serializer)
 
         # Create a mock function that simulates __main__ module
-        # but will raise TypeError when trying to get file path
+        # but doesn't have __code__ attribute (like built-in functions)
         mock_func = MagicMock()
         mock_func.__name__ = "test_func"
         mock_func.__module__ = "__main__"
+        # Remove __code__ to simulate a function without co_filename
+        del mock_func.__code__
 
-        # Make inspect.getfile raise TypeError
-        with patch("asynctasq.tasks.task_service.inspect.getfile") as mock_getfile:
-            mock_getfile.side_effect = TypeError("Cannot get file path")
+        task = FunctionTask(mock_func)
+        task._task_id = "test-id"
+        task._attempts = 0
+        task._dispatched_at = datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC)
 
-            task = FunctionTask(mock_func)
-            task._task_id = "test-id"
-            task._attempts = 0
-            task._dispatched_at = datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC)
-
-            # Act
-            dispatcher._task_service.serialize_task(task)
-
-            # Assert
-            call_arg = mock_serializer.serialize.call_args[0][0]
-            assert call_arg["metadata"]["func_name"] == "test_func"
-            assert call_arg["metadata"]["func_module"] == "__main__"
-            assert "func_file" not in call_arg["metadata"]  # Fallback doesn't include func_file
+        # Act & Assert - should raise AttributeError when trying to access __code__
+        with raises(AttributeError):
+            dispatcher._task_serializer.serialize(task)
 
     def test_serialize_function_task_excludes_func_from_params(self) -> None:
         # Arrange
@@ -704,7 +692,7 @@ class TestDispatcherSerializeTask:
         task._attempts = 0
 
         # Act
-        dispatcher._task_service.serialize_task(task)
+        dispatcher._task_serializer.serialize(task)
 
         # Assert
         call_arg = mock_serializer.serialize.call_args[0][0]

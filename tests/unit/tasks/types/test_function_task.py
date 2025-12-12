@@ -56,11 +56,11 @@ class TestFunctionTask:
         task_instance = FunctionTask(test_func)
 
         # Assert
-        assert task_instance.queue == "default"
-        assert task_instance.max_retries == 3
-        assert task_instance.retry_delay == 60
-        assert task_instance.timeout is None
-        assert task_instance._driver_override is None
+        assert task_instance.config.queue == "default"
+        assert task_instance.config.max_retries == 3
+        assert task_instance.config.retry_delay == 60
+        assert task_instance.config.timeout is None
+        assert task_instance.config.driver_override is None
 
     def test_function_task_init_extracts_decorator_config(self) -> None:
         # Arrange
@@ -72,10 +72,10 @@ class TestFunctionTask:
         task_instance = FunctionTask(test_func)
 
         # Assert
-        assert task_instance.queue == "custom"
-        assert task_instance.max_retries == 5
-        assert task_instance.retry_delay == 120
-        assert task_instance.timeout == 300
+        assert task_instance.config.queue == "custom"
+        assert task_instance.config.max_retries == 5
+        assert task_instance.config.retry_delay == 120
+        assert task_instance.config.timeout == 300
 
     def test_function_task_init_extracts_driver_override(self) -> None:
         # Arrange
@@ -87,7 +87,7 @@ class TestFunctionTask:
         task_instance = FunctionTask(test_func)
 
         # Assert
-        assert task_instance._driver_override == "redis"
+        assert task_instance.config.driver_override == "redis"
 
     @mark.asyncio
     async def test_function_task_handle_async_function(self) -> None:
@@ -98,7 +98,7 @@ class TestFunctionTask:
         task_instance = FunctionTask(async_func, 5)
 
         # Act
-        result = await task_instance.handle()
+        result = await task_instance.run()
 
         # Assert
         assert result == 10
@@ -112,7 +112,7 @@ class TestFunctionTask:
         task_instance = FunctionTask(sync_func, 4)
 
         # Act
-        result = await task_instance.handle()
+        result = await task_instance.run()
 
         # Assert
         assert result == 12
@@ -126,7 +126,7 @@ class TestFunctionTask:
         task_instance = FunctionTask(async_func, a=10, b="test")
 
         # Act
-        result = await task_instance.handle()
+        result = await task_instance.run()
 
         # Assert
         assert result == "10:test"
@@ -140,7 +140,7 @@ class TestFunctionTask:
         task_instance = FunctionTask(sync_func, 1, 2, z=3)
 
         # Act
-        result = await task_instance.handle()
+        result = await task_instance.run()
 
         # Assert
         assert result == 6
@@ -155,7 +155,7 @@ class TestFunctionTask:
         task_instance = FunctionTask(blocking_func)
 
         # Act
-        result = await task_instance.handle()
+        result = await task_instance.run()
 
         # Assert
         assert result == "blocking_result"
@@ -170,7 +170,7 @@ class TestFunctionTask:
 
         # Act & Assert
         with raises(ValueError, match="test error"):
-            await task_instance.handle()
+            await task_instance.run()
 
     @mark.asyncio
     async def test_function_task_handle_async_with_exception(self) -> None:
@@ -182,7 +182,7 @@ class TestFunctionTask:
 
         # Act & Assert
         with raises(ValueError, match="async error"):
-            await task_instance.handle()
+            await task_instance.run()
 
     def test_function_task_with_no_attributes(self) -> None:
         # Arrange
@@ -194,8 +194,8 @@ class TestFunctionTask:
 
         # Assert
         # Should use defaults when attributes don't exist
-        assert task_instance.queue == "default"
-        assert task_instance.max_retries == 3
+        assert task_instance.config.queue == "default"
+        assert task_instance.config.max_retries == 3
 
 
 @mark.unit

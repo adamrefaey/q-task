@@ -1,4 +1,4 @@
-"""Integration tests for ProcessTask with real drivers and ORM serialization."""
+"""Integration tests for SyncProcessTask with real drivers and ORM serialization."""
 
 import asyncio
 import os
@@ -10,13 +10,14 @@ from asynctasq.core.dispatcher import Dispatcher
 from asynctasq.core.worker import Worker
 from asynctasq.drivers.redis_driver import RedisDriver
 from asynctasq.serializers.msgpack_serializer import MsgpackSerializer
-from asynctasq.tasks import ProcessTask
+from asynctasq.tasks import SyncProcessTask
+from asynctasq.tasks.infrastructure.process_pool_manager import ProcessPoolManager
 
 # Test Redis connection
 REDIS_URL = os.getenv("ASYNCTASQ_REDIS_URL", "redis://localhost:6379")
 
 
-class FactorialTask(ProcessTask[int]):
+class FactorialTask(SyncProcessTask[int]):
     """Compute factorial in separate process."""
 
     queue = "test-process"
@@ -25,7 +26,7 @@ class FactorialTask(ProcessTask[int]):
 
     n: int
 
-    def handle_process(self) -> int:
+    def execute(self) -> int:
         """Compute n! in subprocess."""
         result = 1
         for i in range(1, self.n + 1):
@@ -33,14 +34,14 @@ class FactorialTask(ProcessTask[int]):
         return result
 
 
-class CPUIntensiveTask(ProcessTask[dict]):
+class CPUIntensiveTask(SyncProcessTask[dict]):
     """Simulate CPU-intensive work."""
 
     queue = "test-process"
 
     iterations: int
 
-    def handle_process(self) -> dict:
+    def execute(self) -> dict:
         """Perform CPU-intensive computation."""
         import hashlib
 
@@ -51,7 +52,7 @@ class CPUIntensiveTask(ProcessTask[dict]):
         return {"hash": result, "iterations": self.iterations}
 
 
-class AttributeSerializationTask(ProcessTask[dict]):
+class AttributeSerializationTask(SyncProcessTask[dict]):
     """Test attribute serialization to subprocess."""
 
     queue = "test-process"
@@ -61,7 +62,7 @@ class AttributeSerializationTask(ProcessTask[dict]):
     list_val: list[int]
     dict_val: dict[str, int]
 
-    def handle_process(self) -> dict:
+    def execute(self) -> dict:
         """Return all attributes as dict."""
         return {
             "int_val": self.int_val,
@@ -71,7 +72,7 @@ class AttributeSerializationTask(ProcessTask[dict]):
         }
 
 
-class FailingTask(ProcessTask[None]):
+class FailingTask(SyncProcessTask[None]):
     """Task that always fails for retry testing."""
 
     queue = "test-process"
@@ -79,7 +80,7 @@ class FailingTask(ProcessTask[None]):
 
     error_msg: str
 
-    def handle_process(self) -> None:
+    def execute(self) -> None:
         """Raise exception."""
         raise ValueError(self.error_msg)
 
@@ -117,7 +118,7 @@ async def dispatcher(redis_driver):
 async def worker(redis_driver):
     """Create worker with process pool configured."""
     # Ensure process pool is initialized
-    ProcessTask.shutdown_pool(wait=True)
+    ProcessPoolManager.shutdown_pools(wait=True)
 
     worker = Worker(
         queue_driver=redis_driver,
@@ -132,7 +133,7 @@ async def worker(redis_driver):
 
     # Cleanup
     await worker._cleanup()
-    ProcessTask.shutdown_pool(wait=True)
+    ProcessPoolManager.shutdown_pools(wait=True)
 
 
 @pytest.mark.asyncio
@@ -166,7 +167,7 @@ async def test_process_task_end_to_end_with_redis(dispatcher, worker):
 @pytest.mark.asyncio
 @pytest.mark.integration
 async def test_process_task_multiple_concurrent_executions(dispatcher, worker):
-    """Test multiple ProcessTasks execute concurrently."""
+    """Test multiple SyncProcessTasks execute concurrently."""
     # Dispatch multiple tasks
     task_ids = []
     for n in range(3, 8):
@@ -205,7 +206,7 @@ async def test_process_task_multiple_concurrent_executions(dispatcher, worker):
 @pytest.mark.asyncio
 @pytest.mark.integration
 async def test_process_task_cpu_intensive_work(dispatcher, worker):
-    """Test ProcessTask with actual CPU-intensive computation."""
+    """Test SyncProcessTask with actual CPU-intensive computation."""
     # Dispatch CPU-intensive task
     task = CPUIntensiveTask(iterations=1000)
     await dispatcher.dispatch(task)
@@ -266,7 +267,7 @@ async def test_process_task_attribute_serialization(dispatcher, worker):
 @pytest.mark.asyncio
 @pytest.mark.integration
 async def test_process_task_retry_on_failure(dispatcher, worker):
-    """Test ProcessTask retry logic with failures."""
+    """Test SyncProcessTask retry logic with failures."""
     # Dispatch failing task
     task = FailingTask(error_msg="Test error for retry")
     await dispatcher.dispatch(task)
@@ -300,7 +301,7 @@ async def test_process_task_retry_on_failure(dispatcher, worker):
 @pytest.mark.asyncio
 @pytest.mark.integration
 async def test_process_task_with_delayed_execution(dispatcher, worker):
-    """Test ProcessTask with delay parameter."""
+    """Test SyncProcessTask with delay parameter."""
     # Dispatch with 2 second delay
     task = FactorialTask(n=4)
     await dispatcher.dispatch(task, delay=2)
@@ -353,8 +354,8 @@ async def test_process_task_with_delayed_execution(dispatcher, worker):
 async def test_process_pool_lifecycle_with_worker(redis_driver):
     """Test process pool initialization and shutdown with worker lifecycle."""
     # Ensure clean state
-    ProcessTask.shutdown_pool(wait=True)
-    assert ProcessTask._process_pool is None
+    ProcessPoolManager.shutdown_pools(wait=True)
+    assert not ProcessPoolManager.is_initialized()
 
     # Create worker with process pool config
     worker = Worker(
@@ -369,34 +370,35 @@ async def test_process_pool_lifecycle_with_worker(redis_driver):
     await worker.queue_driver.connect()
 
     # Initialize pool (normally done in worker.start())
-    ProcessTask.initialize_pool(
+    ProcessPoolManager.initialize_sync_pool(
         max_workers=worker.process_pool_size,
         max_tasks_per_child=worker.process_pool_max_tasks_per_child,
     )
 
     # Verify pool initialized
-    assert ProcessTask._process_pool is not None
-    assert ProcessTask._pool_size == 2
-    assert ProcessTask._max_tasks_per_child == 5
+    assert ProcessPoolManager.is_initialized()
+    stats = ProcessPoolManager.get_stats()
+    assert stats["sync"]["pool_size"] == 2
+    assert stats["sync"]["max_tasks_per_child"] == 5
 
     # Cleanup (normally done in worker.cleanup())
-    ProcessTask.shutdown_pool(wait=True)
+    ProcessPoolManager.shutdown_pools(wait=True)
 
     # Verify pool shutdown
-    assert ProcessTask._process_pool is None
-    assert ProcessTask._pool_size is None
-    assert ProcessTask._max_tasks_per_child is None
+    assert not ProcessPoolManager.is_initialized()
+    stats = ProcessPoolManager.get_stats()
+    assert stats["sync"]["status"] == "not_initialized"
 
 
 @pytest.mark.asyncio
 @pytest.mark.integration
 async def test_process_task_isolation(dispatcher, worker):
-    """Verify ProcessTask runs in separate process (not main process)."""
+    """Verify SyncProcessTask runs in separate process (not main process)."""
 
-    class GetPIDTask(ProcessTask[int]):
+    class GetPIDTask(SyncProcessTask[int]):
         queue = "test-process"
 
-        def handle_process(self) -> int:
+        def execute(self) -> int:
             import os as subprocess_os
 
             return subprocess_os.getpid()
@@ -429,15 +431,15 @@ async def test_process_task_isolation(dispatcher, worker):
 @pytest.mark.asyncio
 @pytest.mark.integration
 async def test_process_task_with_timeout(dispatcher, worker):
-    """Test ProcessTask timeout handling."""
+    """Test SyncProcessTask timeout handling."""
 
-    class SlowTask(ProcessTask[str]):
+    class SlowTask(SyncProcessTask[str]):
         queue = "test-process"
         timeout = 1  # 1 second timeout
 
         duration: int
 
-        def handle_process(self) -> str:
+        def execute(self) -> str:
             import time
 
             time.sleep(self.duration)
@@ -467,7 +469,7 @@ async def test_process_task_with_timeout(dispatcher, worker):
 @pytest.mark.asyncio
 @pytest.mark.integration
 async def test_process_task_batch_processing(dispatcher, worker):
-    """Test ProcessTask can handle batch of tasks efficiently."""
+    """Test SyncProcessTask can handle batch of tasks efficiently."""
     # Dispatch batch of 10 tasks
     task_ids = []
     for i in range(10):
@@ -506,4 +508,4 @@ async def test_process_task_batch_processing(dispatcher, worker):
 def cleanup_process_pool():
     """Ensure process pool is shutdown after all tests."""
     yield
-    ProcessTask.shutdown_pool(wait=True)
+    ProcessPoolManager.shutdown_pools(wait=True)

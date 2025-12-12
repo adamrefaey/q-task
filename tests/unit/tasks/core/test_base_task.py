@@ -1,4 +1,4 @@
-"""Unit tests for BaseTask module.
+"""Unit tests for AsyncTask module.
 
 Testing Strategy:
 - pytest 9.0.1 with asyncio_mode="auto" (no decorators needed)
@@ -11,17 +11,17 @@ Testing Strategy:
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from pytest import main, mark, raises
+from pytest import main, mark
 
 from asynctasq.drivers import BaseDriver
-from asynctasq.tasks import BaseTask
+from asynctasq.tasks import AsyncTask
 
 
-# Test implementations for abstract BaseTask
-class ConcreteTask(BaseTask[str]):
-    """Concrete implementation of BaseTask for testing."""
+# Test implementations for abstract AsyncTask
+class ConcreteTask(AsyncTask[str]):
+    """Concrete implementation of AsyncTask for testing."""
 
-    async def handle(self) -> str:
+    async def execute(self) -> str:
         """Test implementation."""
         return "success"
 
@@ -55,8 +55,8 @@ class TestTaskInitialization:
         task_instance = ConcreteTask()
 
         # Assert
-        assert hasattr(task_instance, "queue")
-        assert task_instance.queue == "default"
+        assert hasattr(task_instance, "config")
+        assert task_instance.config.queue == "default"
 
     def test_init_with_complex_kwargs(self) -> None:
         # Arrange
@@ -79,19 +79,19 @@ class TestTaskInitialization:
 
     def test_init_overrides_class_attributes(self) -> None:
         # Arrange
-        class CustomTask(BaseTask[str]):
+        class CustomTask(AsyncTask[str]):
             queue = "custom_queue"
             max_retries = 5
 
-            async def handle(self) -> str:
+            async def execute(self) -> str:
                 return "test"
 
         # Act
         task_instance = CustomTask()
 
         # Assert - class attributes should be preserved
-        assert task_instance.queue == "custom_queue"
-        assert task_instance.max_retries == 5
+        assert task_instance.config.queue == "custom_queue"
+        assert task_instance.config.max_retries == 5
 
 
 @mark.unit
@@ -103,35 +103,35 @@ class TestTaskConfiguration:
         task_instance = ConcreteTask()
 
         # Assert
-        assert task_instance.queue == "default"
+        assert task_instance.config.queue == "default"
 
     def test_default_max_retries(self) -> None:
         # Act
         task_instance = ConcreteTask()
 
         # Assert
-        assert task_instance.max_retries == 3
+        assert task_instance.config.max_retries == 3
 
     def test_default_retry_delay(self) -> None:
         # Act
         task_instance = ConcreteTask()
 
         # Assert
-        assert task_instance.retry_delay == 60
+        assert task_instance.config.retry_delay == 60
 
     def test_default_timeout(self) -> None:
         # Act
         task_instance = ConcreteTask()
 
         # Assert
-        assert task_instance.timeout is None
+        assert task_instance.config.timeout is None
 
     def test_default_driver_override(self) -> None:
         # Act
         task_instance = ConcreteTask()
 
         # Assert
-        assert task_instance._driver_override is None
+        assert task_instance.config.driver_override is None
 
     def test_default_delay_seconds(self) -> None:
         # Act
@@ -142,48 +142,36 @@ class TestTaskConfiguration:
 
     def test_custom_configuration(self) -> None:
         # Arrange
-        class CustomTask(BaseTask[str]):
+        class CustomTask(AsyncTask[str]):
             queue = "high_priority"
             max_retries = 10
             retry_delay = 120
             timeout = 300
 
-            async def handle(self) -> str:
+            async def execute(self) -> str:
                 return "test"
 
         # Act
         task_instance = CustomTask()
 
         # Assert
-        assert task_instance.queue == "high_priority"
-        assert task_instance.max_retries == 10
-        assert task_instance.retry_delay == 120
-        assert task_instance.timeout == 300
+        assert task_instance.config.queue == "high_priority"
+        assert task_instance.config.max_retries == 10
+        assert task_instance.config.retry_delay == 120
+        assert task_instance.config.timeout == 300
 
 
 @mark.unit
-class TestTaskHandle:
-    """Test Task.handle() abstract method."""
+class TestTaskExecute:
+    """Test Task.execute() abstract method."""
 
     @mark.asyncio
-    async def test_handle_must_be_implemented(self) -> None:
-        # Arrange
-        class IncompleteTask(BaseTask[str]):
-            pass  # Missing handle() implementation
-
-        # Act & Assert - abstract class cannot be instantiated
-        with raises(TypeError):
-            # Type checker correctly identifies this as an error
-            # but we're testing runtime behavior
-            IncompleteTask()  # type: ignore[abstract]
-
-    @mark.asyncio
-    async def test_handle_execution(self) -> None:
+    async def test_execute_implementation(self) -> None:
         # Arrange
         task_instance = ConcreteTask()
 
         # Act
-        result = await task_instance.handle()
+        result = await task_instance.execute()
 
         # Assert
         assert result == "success"
@@ -207,8 +195,8 @@ class TestTaskFailed:
         # Arrange
         failed_called = False
 
-        class CustomFailedTask(BaseTask[str]):
-            async def handle(self) -> str:
+        class CustomFailedTask(AsyncTask[str]):
+            async def execute(self) -> str:
                 return "test"
 
             async def failed(self, exception: Exception) -> None:
@@ -243,8 +231,8 @@ class TestTaskShouldRetry:
 
     def test_should_retry_custom_implementation(self) -> None:
         # Arrange
-        class CustomRetryTask(BaseTask[str]):
-            async def handle(self) -> str:
+        class CustomRetryTask(AsyncTask[str]):
+            async def execute(self) -> str:
                 return "test"
 
             def should_retry(self, exception: Exception) -> bool:
@@ -269,7 +257,7 @@ class TestTaskOnQueue:
         result = task_instance.on_queue("high_priority")
 
         # Assert
-        assert task_instance.queue == "high_priority"
+        assert task_instance.config.queue == "high_priority"
         assert result is task_instance  # Returns self for chaining
 
     def test_on_queue_method_chaining(self) -> None:
@@ -280,7 +268,7 @@ class TestTaskOnQueue:
         result = task_instance.on_queue("custom").on_queue("another")
 
         # Assert
-        assert task_instance.queue == "another"
+        assert task_instance.config.queue == "another"
         assert result is task_instance
 
 
@@ -343,7 +331,7 @@ class TestTaskRetryAfter:
         result = task_instance.retry_after(180)
 
         # Assert
-        assert task_instance.retry_delay == 180
+        assert task_instance.config.retry_delay == 180
         assert result is task_instance  # Returns self for chaining
 
     def test_retry_after_method_chaining(self) -> None:
@@ -354,7 +342,7 @@ class TestTaskRetryAfter:
         result = task_instance.retry_after(60).retry_after(120)
 
         # Assert
-        assert task_instance.retry_delay == 120
+        assert task_instance.config.retry_delay == 120
         assert result is task_instance
 
     def test_retry_after_with_zero(self) -> None:
@@ -365,7 +353,7 @@ class TestTaskRetryAfter:
         task_instance.retry_after(0)
 
         # Assert
-        assert task_instance.retry_delay == 0
+        assert task_instance.config.retry_delay == 0
 
 
 @mark.unit
@@ -375,8 +363,8 @@ class TestTaskDispatch:
     @mark.asyncio
     async def test_dispatch_calls_get_dispatcher(self) -> None:
         # Arrange
-        # Import BaseTask to ensure it's available when dispatcher is imported
-        from asynctasq.tasks import BaseTask  # noqa: F401
+        # Import AsyncTask to ensure it's available when dispatcher is imported
+        from asynctasq.tasks import AsyncTask  # noqa: F401
 
         task_instance = ConcreteTask()
         mock_dispatcher = AsyncMock()
@@ -396,7 +384,7 @@ class TestTaskDispatch:
     async def test_dispatch_with_driver_override_string(self) -> None:
         # Arrange
         task_instance = ConcreteTask()
-        task_instance._driver_override = "redis"
+        task_instance.config.driver_override = "redis"
         mock_dispatcher = AsyncMock()
         mock_dispatcher.dispatch = AsyncMock(return_value="task-id-456")
 
@@ -414,7 +402,7 @@ class TestTaskDispatch:
         # Arrange
         task_instance = ConcreteTask()
         mock_driver = MagicMock(spec=BaseDriver)
-        task_instance._driver_override = mock_driver
+        task_instance.config.driver_override = mock_driver
         mock_dispatcher = AsyncMock()
         mock_dispatcher.dispatch = AsyncMock(return_value="task-id-789")
 
@@ -534,26 +522,26 @@ class TestTaskEdgeCases:
     def test_task_retry_after_changes_retry_delay(self) -> None:
         # Arrange
         task_instance = ConcreteTask()
-        original_delay = task_instance.retry_delay
+        original_delay = task_instance.config.retry_delay
 
         # Act
         task_instance.retry_after(200)
 
         # Assert
-        assert task_instance.retry_delay == 200
-        assert task_instance.retry_delay != original_delay
+        assert task_instance.config.retry_delay == 200
+        assert task_instance.config.retry_delay != original_delay
 
     def test_task_on_queue_changes_queue(self) -> None:
         # Arrange
         task_instance = ConcreteTask()
-        original_queue = task_instance.queue
+        original_queue = task_instance.config.queue
 
         # Act
         task_instance.on_queue("new_queue")
 
         # Assert
-        assert task_instance.queue == "new_queue"
-        assert task_instance.queue != original_queue
+        assert task_instance.config.queue == "new_queue"
+        assert task_instance.config.queue != original_queue
 
     @mark.asyncio
     async def test_task_dispatch_chain_with_multiple_calls(self) -> None:
@@ -587,7 +575,7 @@ class TestTaskMethodChaining:
         result = task_instance.on_queue("custom").delay(120)
 
         # Assert
-        assert task_instance.queue == "custom"
+        assert task_instance.config.queue == "custom"
         assert task_instance._delay_seconds == 120
         assert result is task_instance
 
@@ -600,7 +588,7 @@ class TestTaskMethodChaining:
 
         # Assert
         assert task_instance._delay_seconds == 60
-        assert task_instance.retry_delay == 180
+        assert task_instance.config.retry_delay == 180
         assert result is task_instance
 
     def test_on_queue_retry_after_chain(self) -> None:
@@ -611,8 +599,8 @@ class TestTaskMethodChaining:
         result = task_instance.on_queue("high").retry_after(240)
 
         # Assert
-        assert task_instance.queue == "high"
-        assert task_instance.retry_delay == 240
+        assert task_instance.config.queue == "high"
+        assert task_instance.config.retry_delay == 240
         assert result is task_instance
 
     def test_complex_chain(self) -> None:
@@ -623,9 +611,9 @@ class TestTaskMethodChaining:
         result = task_instance.on_queue("priority").delay(300).retry_after(120).on_queue("final")
 
         # Assert
-        assert task_instance.queue == "final"
+        assert task_instance.config.queue == "final"
         assert task_instance._delay_seconds == 300
-        assert task_instance.retry_delay == 120
+        assert task_instance.config.retry_delay == 120
         assert result is task_instance
 
 
